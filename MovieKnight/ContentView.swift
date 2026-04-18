@@ -205,6 +205,7 @@ struct AuthView: View {
 
 struct PlatformsView: View {
     @EnvironmentObject var app: AppState
+    @Environment(\.dismiss) private var dismiss
     @State private var selected: Set<String> = []
     @State private var isLoading = true
     @State private var isSaving  = false
@@ -227,7 +228,7 @@ struct PlatformsView: View {
                 }
                 Spacer()
                 if app.page != .platforms {
-                    IconButton(icon: "xmark") { app.page = .catalog }
+                    IconButton(icon: "xmark") { dismiss() }
                 }
                 IconButton(icon: "rectangle.portrait.and.arrow.right") { app.logout() }
             }
@@ -300,14 +301,19 @@ struct PlatformsView: View {
         guard !selected.isEmpty else { errorMsg = "Select at least one service."; return }
         isSaving = true; errorMsg = nil
         let platforms = Array(selected)
-        app.savePlatforms(platforms)                          // persist locally immediately
-        _ = try? await APIService.shared.put(                 // best-effort sync to backend
+        app.savePlatforms(platforms)
+        _ = try? await APIService.shared.put(
             "/platforms",
             body: ["platforms": platforms],
             token: app.token
         ) as GenericResponse
-        app.page = .catalog
         isSaving = false
+        // If shown as a sheet (editing), dismiss it. If onboarding flow, navigate to catalog.
+        if app.page == .platforms {
+            app.page = .catalog
+        } else {
+            dismiss()
+        }
     }
 }
 
