@@ -13,72 +13,82 @@ const styles = {
     display: 'flex',
     flexDirection: 'column',
     alignItems: 'center',
-    justifyContent: 'center',
     background:
-      'radial-gradient(circle at top, rgba(229, 76, 76, 0.18), transparent 32%), linear-gradient(135deg, #16171c 0%, #101114 45%, #1b2230 100%)',
-    color: '#fff',
-    fontFamily: '"Segoe UI", Roboto, system-ui, sans-serif',
-    letterSpacing: 0.01,
-    padding: '32px 16px',
+      'radial-gradient(ellipse at 18% 0%, rgba(233,69,96,0.14) 0%, transparent 46%),' +
+      'radial-gradient(ellipse at 84% 95%, rgba(80,108,220,0.09) 0%, transparent 46%),' +
+      'linear-gradient(180deg, #0b0c11 0%, #0e1019 100%)',
+    color: '#eef0f7',
+    fontFamily:
+      '-apple-system, BlinkMacSystemFont, "SF Pro Display", "Segoe UI", Roboto, system-ui, sans-serif',
+    WebkitFontSmoothing: 'antialiased',
+    padding: '28px 16px 48px',
   },
   shell: {
     width: '100%',
-    maxWidth: 1120,
+    maxWidth: 1080,
     display: 'flex',
     justifyContent: 'center',
   },
   card: {
-    background: 'linear-gradient(180deg, rgba(15, 18, 25, 0.98), rgba(18, 21, 29, 0.95))',
+    background: 'linear-gradient(160deg, rgba(16,19,28,0.99) 0%, rgba(12,14,21,0.99) 100%)',
     borderRadius: 28,
-    boxShadow: '0 30px 100px rgba(0, 0, 0, 0.38)',
-    padding: 32,
+    boxShadow: '0 40px 100px rgba(0,0,0,0.55), inset 0 1px 0 rgba(255,255,255,0.055)',
+    padding: '36px 32px',
     width: '100%',
-    maxWidth: 980,
+    maxWidth: 960,
     display: 'flex',
     flexDirection: 'column',
     alignItems: 'center',
-    border: '1px solid rgba(255, 255, 255, 0.07)',
-    backdropFilter: 'blur(18px)',
+    border: '1px solid rgba(255,255,255,0.065)',
+    backdropFilter: 'blur(24px)',
+    WebkitBackdropFilter: 'blur(24px)',
   },
   authCard: {
-    maxWidth: 440,
+    maxWidth: 420,
+    padding: '48px 40px',
   },
   headerRow: {
     width: '100%',
     display: 'flex',
     justifyContent: 'space-between',
     alignItems: 'flex-start',
-    gap: 16,
-    marginBottom: 24,
+    gap: 12,
+    marginBottom: 28,
     flexWrap: 'wrap',
   },
   headingGroup: {
     textAlign: 'left',
     flex: 1,
-    minWidth: 240,
+    minWidth: 0,
   },
   eyebrow: {
-    color: '#ff9b72',
-    fontSize: 12,
-    fontWeight: 700,
-    letterSpacing: '0.16em',
+    color: '#e94560',
+    fontSize: 11,
+    fontWeight: 800,
+    letterSpacing: '0.22em',
     textTransform: 'uppercase',
-    marginBottom: 10,
+    marginBottom: 8,
   },
   title: {
     margin: 0,
-    fontSize: 32,
-    lineHeight: 1.05,
+    fontSize: 30,
+    fontWeight: 800,
+    lineHeight: 1.06,
+    letterSpacing: '-0.025em',
+    background: 'linear-gradient(135deg, #ffffff 30%, rgba(200,210,235,0.8) 100%)',
+    WebkitBackgroundClip: 'text',
+    WebkitTextFillColor: 'transparent',
+    backgroundClip: 'text',
   },
   subtitle: {
-    margin: '12px 0 0',
-    color: '#b8bdc9',
-    fontSize: 15,
-    lineHeight: 1.5,
+    margin: '9px 0 0',
+    color: '#6e7a93',
+    fontSize: 14,
+    lineHeight: 1.55,
   },
   authMeta: {
     width: '100%',
-    marginBottom: 28,
+    marginBottom: 32,
     textAlign: 'left',
   },
   form: {
@@ -86,92 +96,102 @@ const styles = {
   },
   input: {
     width: '100%',
-    padding: 14,
-    margin: '10px 0',
-    borderRadius: 12,
-    border: '1px solid rgba(255, 255, 255, 0.12)',
+    padding: '15px 16px',
+    margin: '8px 0',
+    borderRadius: 14,
+    border: '1px solid rgba(255,255,255,0.1)',
     fontSize: 16,
-    background: '#1a1d25',
-    color: '#fff',
+    background: 'rgba(255,255,255,0.05)',
+    color: '#eef0f7',
     outline: 'none',
     fontFamily: 'inherit',
     boxSizing: 'border-box',
+    transition: 'border-color 0.2s ease, box-shadow 0.2s ease',
   },
   button: {
     width: '100%',
-    padding: 14,
-    margin: '14px 0 0',
-    borderRadius: 12,
+    padding: '15px 20px',
+    margin: '12px 0 0',
+    borderRadius: 14,
     border: 'none',
-    background: 'linear-gradient(90deg, #ff6a3d 0%, #e93854 100%)',
+    background: 'linear-gradient(135deg, #e94560 0%, #c8304a 100%)',
     color: '#fff',
     fontWeight: 700,
     fontSize: 16,
     cursor: 'pointer',
     fontFamily: 'inherit',
-    boxShadow: '0 12px 28px rgba(233, 56, 84, 0.28)',
+    letterSpacing: '-0.01em',
+    boxShadow: '0 8px 24px rgba(233,69,96,0.32), inset 0 1px 0 rgba(255,255,255,0.12)',
     transition: 'opacity 0.2s ease, transform 0.2s ease',
   },
   buttonSecondary: {
-    background: 'rgba(255, 255, 255, 0.06)',
+    background: 'rgba(255,255,255,0.07)',
     boxShadow: 'none',
+    border: '1px solid rgba(255,255,255,0.09)',
   },
   buttonSmall: {
     width: 'auto',
-    padding: '10px 16px',
+    padding: '9px 16px',
     margin: 0,
-    fontSize: 14,
+    fontSize: 13,
+    fontWeight: 600,
+    borderRadius: 10,
   },
   buttonLoading: {
-    opacity: 0.7,
+    opacity: 0.6,
     pointerEvents: 'none',
   },
   authSwitch: {
-    marginTop: 16,
-    color: '#b8bdc9',
+    marginTop: 20,
+    color: '#6e7a93',
     fontSize: 14,
   },
   inlineButton: {
     background: 'none',
     border: 'none',
     padding: 0,
-    color: '#ff9b72',
+    color: '#e94560',
     font: 'inherit',
     cursor: 'pointer',
+    fontWeight: 600,
   },
   error: {
     width: '100%',
-    background: 'rgba(226, 72, 72, 0.15)',
-    color: '#ff9191',
+    background: 'rgba(233,69,96,0.1)',
+    color: '#ff8fa3',
     marginTop: 16,
     borderRadius: 12,
-    padding: '12px 14px',
+    padding: '12px 16px',
     fontWeight: 600,
+    fontSize: 14,
     boxSizing: 'border-box',
+    border: '1px solid rgba(233,69,96,0.2)',
   },
   info: {
     width: '100%',
-    background: 'rgba(94, 166, 255, 0.12)',
-    color: '#a8d2ff',
+    background: 'rgba(94,166,255,0.09)',
+    color: '#90c4ff',
     marginTop: 16,
     borderRadius: 12,
-    padding: '12px 14px',
+    padding: '12px 16px',
     fontWeight: 500,
+    fontSize: 14,
     boxSizing: 'border-box',
+    border: '1px solid rgba(94,166,255,0.14)',
   },
   topActions: {
     display: 'flex',
     gap: 8,
-    flexWrap: 'wrap',
+    flexWrap: 'nowrap',
     alignItems: 'center',
-    justifyContent: 'flex-end',
+    flexShrink: 0,
   },
   controlRow: {
     width: '100%',
     display: 'flex',
-    gap: 12,
+    gap: 10,
     flexWrap: 'wrap',
-    alignItems: 'center',
+    alignItems: 'flex-end',
     marginBottom: 20,
   },
   dropdownGrid: {
@@ -183,118 +203,117 @@ const styles = {
   },
   dropdownPanel: {
     width: '100%',
-    borderRadius: 18,
-    background: 'linear-gradient(180deg, rgba(255, 255, 255, 0.05), rgba(255, 255, 255, 0.025))',
-    border: '1px solid rgba(255, 255, 255, 0.06)',
+    borderRadius: 16,
+    background: 'rgba(255,255,255,0.03)',
+    border: '1px solid rgba(255,255,255,0.06)',
     overflow: 'hidden',
   },
   dropdownSummary: {
     listStyle: 'none',
     cursor: 'pointer',
-    padding: '14px 16px',
+    padding: '13px 16px',
     display: 'flex',
     alignItems: 'center',
     justifyContent: 'space-between',
-    color: '#eef2f8',
-    fontSize: 13,
-    fontWeight: 700,
-    letterSpacing: '0.06em',
+    color: '#c0c8d8',
+    fontSize: 11,
+    fontWeight: 800,
+    letterSpacing: '0.12em',
     textTransform: 'uppercase',
+    userSelect: 'none',
   },
   dropdownMeta: {
-    color: '#97a6bf',
+    color: '#6e7a93',
     fontSize: 11,
     fontWeight: 600,
     letterSpacing: '0.04em',
   },
   dropdownBody: {
-    padding: '0 16px 16px',
+    padding: '4px 16px 16px',
   },
   serviceFilterRow: {
     width: '100%',
     display: 'flex',
     flexWrap: 'wrap',
-    gap: 10,
-    marginBottom: 20,
+    gap: 8,
+    marginBottom: 4,
   },
   controlGroup: {
     display: 'flex',
     flexDirection: 'column',
     gap: 6,
-    minWidth: 160,
+    flex: '1 1 150px',
   },
   controlLabel: {
-    color: '#b8bdc9',
-    fontSize: 12,
+    color: '#6e7a93',
+    fontSize: 11,
     fontWeight: 700,
-    letterSpacing: '0.08em',
+    letterSpacing: '0.12em',
     textTransform: 'uppercase',
   },
   select: {
     borderRadius: 12,
-    border: '1px solid rgba(255, 255, 255, 0.12)',
-    background: '#1a1d25',
-    color: '#fff',
-    padding: '12px 14px',
+    border: '1px solid rgba(255,255,255,0.1)',
+    background: 'rgba(255,255,255,0.05)',
+    color: '#eef0f7',
+    padding: '11px 14px',
     fontSize: 15,
     fontFamily: 'inherit',
     outline: 'none',
+    width: '100%',
+    cursor: 'pointer',
   },
   catalogMeta: {
     width: '100%',
-    color: '#a8b0bf',
-    fontSize: 14,
+    color: '#6e7a93',
+    fontSize: 13,
     marginBottom: 20,
-    lineHeight: 1.5,
-    padding: '14px 16px',
-    borderRadius: 16,
-    background: 'linear-gradient(180deg, rgba(255, 255, 255, 0.05), rgba(255, 255, 255, 0.03))',
-    border: '1px solid rgba(255, 255, 255, 0.06)',
+    lineHeight: 1.55,
+    padding: '11px 16px',
+    borderRadius: 13,
+    background: 'rgba(255,255,255,0.03)',
+    border: '1px solid rgba(255,255,255,0.05)',
   },
   platformGrid: {
     display: 'grid',
-    gridTemplateColumns: 'repeat(auto-fit, minmax(132px, 1fr))',
-    gap: 20,
+    gridTemplateColumns: 'repeat(auto-fill, minmax(108px, 1fr))',
+    gap: 14,
     width: '100%',
-    marginBottom: 28,
-    marginTop: 12,
-    justifyItems: 'center',
+    marginBottom: 24,
+    marginTop: 8,
   },
   platformCard: {
-    width: 120,
-    minHeight: 136,
-    borderRadius: 18,
-    background: 'linear-gradient(180deg, rgba(36, 41, 54, 0.95), rgba(24, 28, 37, 0.95))',
+    width: '100%',
+    minHeight: 108,
+    borderRadius: 16,
+    background: 'rgba(255,255,255,0.04)',
     display: 'flex',
     flexDirection: 'column',
     alignItems: 'center',
     justifyContent: 'center',
-    border: '1px solid rgba(255, 255, 255, 0.12)',
+    border: '1.5px solid rgba(255,255,255,0.07)',
     cursor: 'pointer',
-    transition: 'all 0.25s ease',
-    flexShrink: 0,
-    padding: 12,
+    padding: '12px 8px',
     boxSizing: 'border-box',
-    gap: 12,
+    gap: 8,
   },
   platformCardSelected: {
-    border: '1px solid rgba(255, 138, 92, 0.95)',
-    background: 'linear-gradient(180deg, rgba(68, 35, 31, 0.95), rgba(33, 20, 26, 0.98))',
-    boxShadow: '0 14px 32px rgba(255, 106, 61, 0.24)',
-    transform: 'translateY(-4px)',
+    border: '1.5px solid rgba(233,69,96,0.65)',
+    background: 'linear-gradient(160deg, rgba(233,69,96,0.14) 0%, rgba(180,30,54,0.09) 100%)',
+    boxShadow: '0 8px 28px rgba(233,69,96,0.22), inset 0 1px 0 rgba(255,255,255,0.07)',
   },
   platformLabel: {
     textAlign: 'center',
-    fontSize: 13,
-    color: '#d3d6de',
-    fontWeight: 500,
+    fontSize: 11,
+    color: '#8a93a8',
+    fontWeight: 600,
     userSelect: 'none',
     maxWidth: '100%',
     lineHeight: 1.3,
   },
   platformLogo: {
-    width: 96,
-    height: 96,
+    width: 70,
+    height: 70,
     objectFit: 'contain',
     objectPosition: 'center',
     display: 'block',
@@ -302,8 +321,8 @@ const styles = {
   sectionActions: {
     width: '100%',
     display: 'flex',
-    justifyContent: 'space-between',
-    gap: 12,
+    justifyContent: 'flex-end',
+    gap: 10,
     flexWrap: 'wrap',
   },
   sectionBlock: {
@@ -312,108 +331,121 @@ const styles = {
     marginBottom: 20,
   },
   sectionLabel: {
-    color: '#b8bdc9',
-    fontSize: 12,
+    color: '#6e7a93',
+    fontSize: 11,
     fontWeight: 700,
-    letterSpacing: '0.08em',
+    letterSpacing: '0.12em',
     textTransform: 'uppercase',
-    marginBottom: 12,
+    marginBottom: 10,
   },
   movieList: {
     width: '100%',
     display: 'grid',
-    gap: 18,
+    gap: 14,
   },
   movieCard: {
-    background: 'linear-gradient(145deg, rgba(29, 34, 45, 0.98), rgba(17, 20, 28, 0.98))',
-    borderRadius: 24,
-    padding: 20,
-    color: '#fff',
+    background: 'linear-gradient(145deg, rgba(20,23,34,0.97) 0%, rgba(14,16,24,0.97) 100%)',
+    borderRadius: 20,
+    padding: '18px 20px',
+    color: '#eef0f7',
     width: '100%',
     display: 'grid',
-    gridTemplateColumns: '120px minmax(0, 1fr)',
-    gap: 20,
+    gridTemplateColumns: '108px minmax(0, 1fr)',
+    gap: 18,
     boxSizing: 'border-box',
-    border: '1px solid rgba(255, 255, 255, 0.07)',
-    boxShadow: '0 16px 40px rgba(0, 0, 0, 0.22)',
+    border: '1px solid rgba(255,255,255,0.06)',
+    boxShadow: '0 4px 20px rgba(0,0,0,0.28)',
+    position: 'relative',
+    overflow: 'hidden',
   },
   moviePoster: {
-    width: 120,
-    height: 180,
-    borderRadius: 18,
+    width: 108,
+    height: 162,
+    borderRadius: 14,
     objectFit: 'cover',
-    background: 'rgba(255, 255, 255, 0.04)',
-    boxShadow: '0 12px 32px rgba(0, 0, 0, 0.3)',
+    background: 'rgba(255,255,255,0.04)',
+    boxShadow: '0 8px 24px rgba(0,0,0,0.38)',
+    flexShrink: 0,
   },
   moviePosterPlaceholder: {
-    width: 120,
-    height: 180,
-    borderRadius: 18,
-    background: 'linear-gradient(180deg, rgba(255, 255, 255, 0.08), rgba(255, 255, 255, 0.03))',
+    width: 108,
+    height: 162,
+    borderRadius: 14,
+    background: 'linear-gradient(160deg, rgba(255,255,255,0.06), rgba(255,255,255,0.02))',
     display: 'flex',
     alignItems: 'center',
     justifyContent: 'center',
-    color: '#9ca3af',
-    fontSize: 12,
+    color: '#3a4258',
+    fontSize: 10,
     textTransform: 'uppercase',
-    letterSpacing: '0.12em',
+    letterSpacing: '0.1em',
+    flexShrink: 0,
   },
   movieBody: {
     minWidth: 0,
     display: 'flex',
     flexDirection: 'column',
+    overflow: 'hidden',
   },
   movieTitle: {
-    fontSize: 24,
+    fontSize: 18,
     fontWeight: 700,
-    marginBottom: 10,
-    lineHeight: 1.08,
+    marginBottom: 8,
+    lineHeight: 1.18,
+    letterSpacing: '-0.01em',
+    overflow: 'hidden',
+    display: '-webkit-box',
+    WebkitLineClamp: 2,
+    WebkitBoxOrient: 'vertical',
   },
   movieSubhead: {
     display: 'flex',
-    gap: 8,
+    gap: 6,
     flexWrap: 'wrap',
     alignItems: 'center',
-    marginBottom: 14,
+    marginBottom: 10,
   },
   chip: {
-    borderRadius: 999,
-    padding: '7px 11px',
+    borderRadius: 7,
+    padding: '4px 9px',
     fontSize: 11,
     fontWeight: 700,
-    background: 'rgba(255, 255, 255, 0.07)',
-    color: '#e1e7f0',
-    letterSpacing: '0.04em',
-    textTransform: 'uppercase',
+    background: 'rgba(255,255,255,0.07)',
+    color: '#b0bac8',
+    letterSpacing: '0.02em',
   },
   chipAccent: {
-    background: 'linear-gradient(90deg, rgba(255, 106, 61, 0.2), rgba(233, 56, 84, 0.22))',
-    color: '#ffd0c1',
+    background: 'rgba(233,69,96,0.17)',
+    color: '#ff8fa3',
+  },
+  chipTV: {
+    background: 'rgba(94,166,255,0.17)',
+    color: '#7db8ff',
   },
   chipMuted: {
-    background: 'rgba(94, 166, 255, 0.14)',
-    color: '#bedeff',
+    background: 'rgba(94,166,255,0.13)',
+    color: '#90c4ff',
   },
   serviceFilterButton: {
-    borderRadius: 999,
-    border: '1px solid rgba(255, 255, 255, 0.08)',
-    background: 'rgba(255, 255, 255, 0.04)',
-    color: '#e9eef8',
-    padding: '10px 14px',
+    borderRadius: 20,
+    border: '1px solid rgba(255,255,255,0.08)',
+    background: 'rgba(255,255,255,0.04)',
+    color: '#b0bac8',
+    padding: '9px 14px',
     display: 'inline-flex',
     alignItems: 'center',
-    gap: 8,
+    gap: 7,
     cursor: 'pointer',
     fontFamily: 'inherit',
     fontSize: 12,
     fontWeight: 700,
-    letterSpacing: '0.04em',
-    textTransform: 'uppercase',
+    letterSpacing: '0.02em',
+    transition: 'all 0.18s ease',
   },
   serviceFilterButtonActive: {
-    background: 'linear-gradient(90deg, rgba(255, 106, 61, 0.2), rgba(233, 56, 84, 0.22))',
-    border: '1px solid rgba(255, 148, 112, 0.4)',
-    color: '#fff4ef',
+    background: 'rgba(233,69,96,0.17)',
+    border: '1px solid rgba(233,69,96,0.4)',
+    color: '#ff8fa3',
   },
   serviceLogoTiny: {
     width: 18,
@@ -423,32 +455,41 @@ const styles = {
     flexShrink: 0,
   },
   movieOverview: {
-    fontSize: 15,
-    color: '#cfd5e0',
-    marginBottom: 10,
-    lineHeight: 1.65,
+    fontSize: 13,
+    color: '#7a8499',
+    marginBottom: 8,
+    lineHeight: 1.62,
+    overflow: 'hidden',
+    display: '-webkit-box',
+    WebkitLineClamp: 3,
+    WebkitBoxOrient: 'vertical',
   },
   ratingGrid: {
-    display: 'grid',
-    gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))',
-    gap: 10,
-    marginTop: 16,
+    display: 'flex',
+    gap: 8,
+    overflowX: 'auto',
+    WebkitOverflowScrolling: 'touch',
+    scrollbarWidth: 'none',
+    padding: '2px 0 4px',
+    marginTop: 12,
   },
   ratingChip: {
-    borderRadius: 18,
-    padding: '12px 14px',
-    background: 'linear-gradient(180deg, rgba(255, 255, 255, 0.065), rgba(255, 255, 255, 0.035))',
+    borderRadius: 12,
+    padding: '9px 12px',
+    background: 'rgba(255,255,255,0.05)',
     color: '#edf1f8',
-    fontSize: 13,
+    fontSize: 12,
     fontWeight: 600,
     display: 'inline-flex',
     alignItems: 'center',
-    gap: 10,
-    border: '1px solid rgba(255, 255, 255, 0.06)',
+    gap: 8,
+    border: '1px solid rgba(255,255,255,0.07)',
+    flexShrink: 0,
+    whiteSpace: 'nowrap',
   },
   ratingLogo: {
-    width: 28,
-    height: 28,
+    width: 22,
+    height: 22,
     objectFit: 'contain',
     flexShrink: 0,
   },
@@ -459,85 +500,90 @@ const styles = {
     lineHeight: 1.1,
   },
   ratingLabel: {
-    fontSize: 10,
-    color: '#98a4ba',
+    fontSize: 9,
+    color: '#6e7a93',
     textTransform: 'uppercase',
-    letterSpacing: '0.11em',
+    letterSpacing: '0.1em',
   },
   ratingValue: {
-    fontSize: 15,
-    color: '#f5f7fb',
+    fontSize: 14,
+    color: '#eef0f7',
     fontWeight: 700,
   },
   providerRow: {
     display: 'flex',
     flexWrap: 'wrap',
-    gap: 8,
-    marginTop: 16,
+    gap: 6,
+    marginTop: 10,
   },
   providerChip: {
     display: 'inline-flex',
     alignItems: 'center',
-    gap: 8,
-    padding: '8px 10px',
+    gap: 6,
+    padding: '5px 9px',
     borderRadius: 999,
-    background: 'rgba(255, 255, 255, 0.06)',
-    border: '1px solid rgba(255, 255, 255, 0.05)',
-    color: '#e7edf7',
-    fontSize: 12,
+    background: 'rgba(255,255,255,0.05)',
+    border: '1px solid rgba(255,255,255,0.06)',
+    color: '#b0bac8',
+    fontSize: 11,
     fontWeight: 700,
   },
   providerLogo: {
-    width: 20,
-    height: 20,
+    width: 16,
+    height: 16,
     objectFit: 'contain',
     display: 'block',
     flexShrink: 0,
   },
   movieDate: {
-    fontSize: 13,
-    color: '#ffbf9f',
+    fontSize: 12,
+    color: '#e94560',
+    fontWeight: 600,
   },
   emptyState: {
-    color: '#9ca3af',
+    color: '#6e7a93',
     textAlign: 'center',
-    marginTop: 12,
+    marginTop: 20,
+    fontSize: 14,
+    lineHeight: 1.5,
   },
   loadMoreWrap: {
     width: '100%',
     display: 'flex',
     justifyContent: 'center',
-    marginTop: 20,
+    marginTop: 24,
   },
   paginationRow: {
     width: '100%',
     display: 'flex',
     justifyContent: 'center',
     alignItems: 'center',
-    gap: 10,
+    gap: 7,
     flexWrap: 'wrap',
-    marginTop: 20,
+    marginTop: 24,
   },
   paginationSummary: {
-    color: '#9ca3af',
-    fontSize: 13,
+    color: '#6e7a93',
+    fontSize: 12,
+    fontWeight: 600,
     marginRight: 4,
   },
   pageButton: {
-    minWidth: 42,
-    height: 42,
-    borderRadius: 999,
-    border: '1px solid rgba(255, 255, 255, 0.08)',
-    background: 'rgba(255, 255, 255, 0.04)',
-    color: '#eef2f8',
+    minWidth: 40,
+    height: 40,
+    borderRadius: 10,
+    border: '1px solid rgba(255,255,255,0.08)',
+    background: 'rgba(255,255,255,0.04)',
+    color: '#c0c8d8',
     fontFamily: 'inherit',
     fontSize: 13,
     fontWeight: 700,
     cursor: 'pointer',
+    transition: 'all 0.18s ease',
   },
   pageButtonActive: {
-    background: 'linear-gradient(90deg, rgba(255, 106, 61, 0.22), rgba(233, 56, 84, 0.24))',
-    border: '1px solid rgba(255, 148, 112, 0.4)',
+    background: 'linear-gradient(135deg, rgba(233,69,96,0.26), rgba(200,48,74,0.3))',
+    border: '1px solid rgba(233,69,96,0.48)',
     color: '#fff',
   },
 };
@@ -1058,12 +1104,12 @@ function App() {
   );
 
   const renderPlatformSelector = () => (
-    <div style={styles.platformGrid}>
+    <div style={styles.platformGrid} className="platform-grid-wrap">
       {streamingPlatforms.map((platform) => {
         const isSelected = selected.includes(platform.key);
 
         return (
-          <div key={platform.key} style={{ display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
+          <div key={platform.key}>
             <input
               type="checkbox"
               id={`platform-${platform.key}`}
@@ -1079,13 +1125,14 @@ function App() {
             />
             <label
               htmlFor={`platform-${platform.key}`}
+              className="platform-tile"
               style={{
                 ...styles.platformCard,
                 ...(isSelected ? styles.platformCardSelected : {}),
               }}
             >
-              <img src={platform.logo} alt={platform.name} style={styles.platformLogo} />
-              <span style={styles.platformLabel}>{platform.name}</span>
+              <img src={platform.logo} alt={platform.name} style={styles.platformLogo} className="platform-tile-logo" />
+              <span style={styles.platformLabel} className="platform-tile-label">{platform.name}</span>
             </label>
           </div>
         );
@@ -1095,8 +1142,8 @@ function App() {
 
   if (loadingSession) {
     return (
-      <div style={styles.container}>
-        <div style={{ ...styles.card, ...styles.authCard }}>
+      <div style={styles.container} className="mk-container">
+        <div style={{ ...styles.card, ...styles.authCard }} className="mk-card mk-card-auth">
           <div style={styles.authMeta}>
             <div style={styles.eyebrow}>MovieKnight</div>
             <h1 style={styles.title}>Restoring session</h1>
@@ -1111,11 +1158,11 @@ function App() {
     const isRegister = authMode === 'register';
 
     return (
-      <div style={styles.container}>
-        <div style={styles.shell}>
-          <div style={{ ...styles.card, ...styles.authCard }}>
+      <div style={styles.container} className="mk-container">
+        <div style={styles.shell} className="mk-shell">
+          <div style={{ ...styles.card, ...styles.authCard }} className="mk-card mk-card-auth fade-in">
             <div style={styles.authMeta}>
-              <div style={styles.eyebrow}>MovieKnight</div>
+              <div style={styles.eyebrow}>🎬 MovieKnight</div>
               <h1 style={styles.title}>{isRegister ? 'Create your account' : 'Sign in'}</h1>
               <p style={styles.subtitle}>
                 {isRegister
@@ -1127,6 +1174,7 @@ function App() {
             <form onSubmit={handleAuth} style={styles.form}>
               <input
                 style={styles.input}
+                className="mk-input"
                 placeholder="Username"
                 value={username}
                 onChange={(event) => setUsername(event.target.value)}
@@ -1134,6 +1182,7 @@ function App() {
               />
               <input
                 style={styles.input}
+                className="mk-input"
                 placeholder="Password"
                 type="password"
                 value={password}
@@ -1142,6 +1191,7 @@ function App() {
               />
               <button
                 style={{ ...styles.button, ...(loadingAuth ? styles.buttonLoading : {}) }}
+                className="btn-tap"
                 type="submit"
                 disabled={loadingAuth}
               >
@@ -1150,6 +1200,7 @@ function App() {
               {!isRegister ? (
                 <button
                   style={{ ...styles.button, ...styles.buttonSecondary }}
+                  className="btn-tap"
                   onClick={handleBypassLogin}
                   type="button"
                 >
@@ -1181,10 +1232,10 @@ function App() {
 
   if (showSettings || page === 'platforms') {
     return (
-      <div style={styles.container}>
-        <div style={styles.shell}>
-          <div style={styles.card}>
-            <div style={styles.headerRow}>
+      <div style={styles.container} className="mk-container">
+        <div style={styles.shell} className="mk-shell">
+          <div style={styles.card} className="mk-card fade-in">
+            <div style={styles.headerRow} className="header-row-wrap">
               <div style={styles.headingGroup}>
                 <div style={styles.eyebrow}>Streaming Setup</div>
                 <h1 style={styles.title}>{showSettings ? 'Edit your services' : 'Choose your streaming platforms'}</h1>
@@ -1192,10 +1243,11 @@ function App() {
                   Signed in as {username || 'your account'}. Select every service you want MovieKnight to search.
                 </p>
               </div>
-              <div style={styles.topActions}>
+              <div style={styles.topActions} className="top-actions-wrap">
                 {page === 'platforms' ? null : (
                   <button
                     style={{ ...styles.button, ...styles.buttonSecondary, ...styles.buttonSmall }}
+                    className="btn-tap"
                     onClick={() => {
                       setShowSettings(false);
                       setPage('movies');
@@ -1203,11 +1255,12 @@ function App() {
                     }}
                     type="button"
                   >
-                    Back to Movies
+                    ← Back
                   </button>
                 )}
                 <button
                   style={{ ...styles.button, ...styles.buttonSecondary, ...styles.buttonSmall }}
+                  className="btn-tap"
                   onClick={() => logout()}
                   type="button"
                 >
@@ -1216,7 +1269,7 @@ function App() {
               </div>
             </div>
 
-            <div style={styles.dropdownGrid}>
+            <div style={styles.dropdownGrid} className="dropdown-grid-wrap">
               <details style={styles.dropdownPanel} open>
                 <summary style={styles.dropdownSummary}>
                   <span>Streaming Services</span>
@@ -1240,6 +1293,7 @@ function App() {
                           key={language.key}
                           type="button"
                           onClick={() => toggleLanguage(language.key)}
+                          className="btn-tap"
                           style={{
                             ...styles.serviceFilterButton,
                             ...(isActive ? styles.serviceFilterButtonActive : {}),
@@ -1255,8 +1309,8 @@ function App() {
             </div>
 
             <div style={styles.sectionActions}>
-              <button style={styles.button} onClick={handleSavePlatforms} type="button">
-                {showSettings ? 'Save Changes' : 'Save and Continue'}
+              <button style={styles.button} className="btn-tap" onClick={handleSavePlatforms} type="button">
+                {showSettings ? 'Save Changes' : 'Save and Continue →'}
               </button>
             </div>
 
@@ -1269,22 +1323,23 @@ function App() {
 
   if (page === 'movies') {
     return (
-      <div style={styles.container}>
-        <div style={styles.shell}>
-          <div style={styles.card}>
-            <div style={styles.headerRow}>
+      <div style={styles.container} className="mk-container">
+        <div style={styles.shell} className="mk-shell">
+          <div style={styles.card} className="mk-card fade-in">
+            <div style={styles.headerRow} className="header-row-wrap">
               <div style={styles.headingGroup}>
-                <div style={styles.eyebrow}>Catalog</div>
-                <h1 style={styles.title}>Streaming Catalog</h1>
-                <p style={styles.subtitle}>Live provider-backed movies and TV titles for the services attached to this account.</p>
+                <div style={styles.eyebrow}>🎬 Catalog</div>
+                <h1 style={styles.title}>MovieKnight</h1>
+                <p style={styles.subtitle}>Live movies &amp; TV from your selected streaming services.</p>
               </div>
-              <div style={styles.topActions}>
+              <div style={styles.topActions} className="top-actions-wrap">
                 <button
                   style={{
                     ...styles.button,
                     ...styles.buttonSmall,
                     ...(loadingMovies ? styles.buttonLoading : {}),
                   }}
+                  className="btn-tap"
                   onClick={fetchMovies}
                   disabled={loadingMovies}
                   type="button"
@@ -1293,16 +1348,18 @@ function App() {
                 </button>
                 <button
                   style={{ ...styles.button, ...styles.buttonSecondary, ...styles.buttonSmall }}
+                  className="btn-tap"
                   onClick={() => {
                     clearFeedback();
                     setShowSettings(true);
                   }}
                   type="button"
                 >
-                  Settings
+                  ⚙ Settings
                 </button>
                 <button
                   style={{ ...styles.button, ...styles.buttonSecondary, ...styles.buttonSmall }}
+                  className="btn-tap"
                   onClick={() => logout()}
                   type="button"
                 >
@@ -1311,10 +1368,10 @@ function App() {
               </div>
             </div>
 
-            <div style={styles.controlRow}>
+            <div style={styles.controlRow} className="control-row-wrap">
               <div style={styles.controlGroup}>
                 <span style={styles.controlLabel}>Type</span>
-                <select style={styles.select} value={mediaTypeFilter} onChange={(event) => { setMediaTypeFilter(event.target.value); setCatalogPage(1); }}>
+                <select style={styles.select} className="mk-select" value={mediaTypeFilter} onChange={(event) => { setMediaTypeFilter(event.target.value); setCatalogPage(1); }}>
                   <option value="tv">TV Shows</option>
                   <option value="movie">Movies</option>
                   <option value="all">Movies + TV</option>
@@ -1323,7 +1380,7 @@ function App() {
               </div>
               <div style={styles.controlGroup}>
                 <span style={styles.controlLabel}>Sort By</span>
-                <select style={styles.select} value={sortBy} onChange={(event) => { setSortBy(event.target.value); setCatalogPage(1); }}>
+                <select style={styles.select} className="mk-select" value={sortBy} onChange={(event) => { setSortBy(event.target.value); setCatalogPage(1); }}>
                   <option value="popularity">Popularity</option>
                   <option value="tmdb">TMDb Rating</option>
                   <option value="imdb">IMDb Rating</option>
@@ -1335,7 +1392,7 @@ function App() {
               </div>
             </div>
 
-            <div style={styles.dropdownGrid}>
+            <div style={styles.dropdownGrid} className="dropdown-grid-wrap">
               <details style={styles.dropdownPanel}>
                 <summary style={styles.dropdownSummary}>
                   <span>Service Filter</span>
@@ -1353,6 +1410,7 @@ function App() {
                             key={platform.key}
                             type="button"
                             onClick={() => toggleServiceFilter(platform.key)}
+                            className="btn-tap"
                             style={{
                               ...styles.serviceFilterButton,
                               ...(isActive ? styles.serviceFilterButtonActive : {}),
@@ -1384,6 +1442,7 @@ function App() {
                             key={language.key}
                             type="button"
                             onClick={() => toggleLanguageFilter(language.key)}
+                            className="btn-tap"
                             style={{
                               ...styles.serviceFilterButton,
                               ...(isActive ? styles.serviceFilterButtonActive : {}),
@@ -1400,26 +1459,19 @@ function App() {
 
             {catalogMeta ? (
               <div style={styles.catalogMeta}>
-                Showing {catalogMeta.visibleCount || movies.length} titles on page {catalogMeta.page || catalogPage} from {catalogMeta.resultCount || movies.length} cached matches across {catalogMeta.platformCount || selected.length} selected services.
-                {catalogMeta.lastUpdatedAt ? ` Updated ${new Date(catalogMeta.lastUpdatedAt).toLocaleString()}.` : ''}
-                {catalogMeta.refreshing ? ' ⟳ Syncing in background…' : ''}
-                {catalogMeta.languages?.length
-                  ? ` Languages: ${catalogMeta.languages
-                      .map((languageKey) => languageOptions.find((language) => language.key === languageKey)?.name || languageKey)
-                      .join(', ')}.`
-                  : ''}
+                Showing {catalogMeta.visibleCount || movies.length} titles · page {catalogMeta.page || catalogPage} of {Math.ceil((catalogMeta.resultCount || movies.length) / 20)}{catalogMeta.lastUpdatedAt ? ` · Updated ${new Date(catalogMeta.lastUpdatedAt).toLocaleString()}` : ''}{catalogMeta.refreshing ? ' · ⟳ Syncing…' : ''}
               </div>
             ) : null}
 
             {loadingMovies ? (
               <div style={styles.movieList}>
                 {Array.from({ length: 6 }).map((_, i) => (
-                  <div key={i} style={{ ...styles.movieCard, opacity: 0.45 }}>
-                    <div style={{ ...styles.moviePosterPlaceholder, background: 'rgba(255,255,255,0.06)' }} />
+                  <div key={i} style={{ ...styles.movieCard, opacity: 0.45 }} className="movie-card-wrap">
+                    <div style={{ ...styles.moviePosterPlaceholder, background: 'rgba(255,255,255,0.06)' }} className="movie-poster-ph shimmer" />
                     <div style={styles.movieBody}>
-                      <div style={{ height: 28, borderRadius: 8, background: 'rgba(255,255,255,0.08)', marginBottom: 12, width: '60%' }} />
-                      <div style={{ height: 16, borderRadius: 8, background: 'rgba(255,255,255,0.05)', marginBottom: 8, width: '40%' }} />
-                      <div style={{ height: 14, borderRadius: 8, background: 'rgba(255,255,255,0.04)', width: '90%' }} />
+                      <div style={{ height: 28, borderRadius: 8, background: 'rgba(255,255,255,0.08)', marginBottom: 12, width: '60%' }} className="shimmer" />
+                      <div style={{ height: 16, borderRadius: 8, background: 'rgba(255,255,255,0.05)', marginBottom: 8, width: '40%' }} className="shimmer" />
+                      <div style={{ height: 14, borderRadius: 8, background: 'rgba(255,255,255,0.04)', width: '90%' }} className="shimmer" />
                     </div>
                   </div>
                 ))}
@@ -1428,19 +1480,20 @@ function App() {
               <div style={styles.movieList}>
                 {movies.map((movie) => {
                   const ratingEntries = ratingEntriesForItem(movie);
+                  const isTV = movie.mediaType === 'tv';
                   return (
-                    <div key={movie.id} style={styles.movieCard}>
+                    <div key={movie.id} style={styles.movieCard} className="movie-card-wrap" data-media={movie.mediaType}>
                       {movie.posterUrl ? (
-                        <img src={movie.posterUrl} alt={movie.title} style={styles.moviePoster} loading="lazy" />
+                        <img src={movie.posterUrl} alt={movie.title} style={styles.moviePoster} className="movie-poster-el" loading="lazy" />
                       ) : (
-                        <div style={styles.moviePosterPlaceholder}>No Poster</div>
+                        <div style={styles.moviePosterPlaceholder} className="movie-poster-ph">🎬</div>
                       )}
                       <div style={styles.movieBody}>
-                        <div style={styles.movieTitle}>
+                        <div style={styles.movieTitle} className="movie-title-el">
                           {movie.title}
                         </div>
                         <div style={styles.movieSubhead}>
-                          <span style={{ ...styles.chip, ...styles.chipAccent }}>{formatMediaType(movie.mediaType)}</span>
+                          <span style={{ ...styles.chip, ...(isTV ? styles.chipTV : styles.chipAccent) }}>{formatMediaType(movie.mediaType)}</span>
                           {movie.year ? <span style={styles.chip}>{movie.year}</span> : null}
                         </div>
                         {movie.overview ? <div style={styles.movieOverview}>{movie.overview}</div> : null}
@@ -1465,7 +1518,7 @@ function App() {
                           </div>
                         ) : null}
                         {ratingEntries.length ? (
-                          <div style={styles.ratingGrid}>
+                          <div style={styles.ratingGrid} className="rating-row">
                             {ratingEntries.map((entry) => {
                               const visual = getRatingVisual(movie, entry.key);
                               return (
@@ -1494,15 +1547,17 @@ function App() {
                 <button
                   type="button"
                   style={styles.pageButton}
+                  className="btn-tap page-btn"
                   onClick={() => setCatalogPage((current) => Math.max(1, current - 1))}
                   disabled={catalogPage === 1}
                 >
-                  Prev
+                  ‹ Prev
                 </button>
                 {pageNumbers.map((pageNumber) => (
                   <button
                     key={pageNumber}
                     type="button"
+                    className="btn-tap page-btn"
                     style={{
                       ...styles.pageButton,
                       ...(pageNumber === catalogPage ? styles.pageButtonActive : {}),
@@ -1515,10 +1570,11 @@ function App() {
                 <button
                   type="button"
                   style={styles.pageButton}
+                  className="btn-tap page-btn"
                   onClick={() => setCatalogPage((current) => Math.min(totalPages, current + 1))}
                   disabled={catalogPage === totalPages}
                 >
-                  Next
+                  Next ›
                 </button>
               </div>
             ) : null}
