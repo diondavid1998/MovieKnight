@@ -484,4 +484,7 @@ module.exports = {
   fetchOmdbRatings,
   fetchCatalogByPlatforms,
   fetchTitleDetails,
+  // Exported for unit testing
+  buildRatingsPayload,
+  toSortableRating,
 };

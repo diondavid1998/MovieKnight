@@ -709,4 +709,8 @@ module.exports = {
   refreshAllCachedScopes,
   startDailyCatalogRefresh,
   syncScope,
+  // Exported for unit testing
+  buildScopeKey,
+  mapWithConcurrency,
+  isRateLimitError,
 };

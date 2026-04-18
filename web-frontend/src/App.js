@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import './App.css';
+import { parsePercent, ratingEntriesForItem, buildApiErrorMessage, getRottenTomatoesType } from './utils';
 
 const API_BASE = process.env.REACT_APP_API_BASE || 'https://streamscore-backend.onrender.com';
 const AUTH_TOKEN_KEY = 'movieKnight.authToken';
@@ -671,12 +672,7 @@ function App() {
   const [showIosTip, setShowIosTip] = useState(false);
   const abortRef = useRef(null);
 
-  const buildApiErrorMessage = (data, fallbackMessage) => {
-    if (data?.error && data?.details) {
-      return `${data.error}: ${data.details}`;
-    }
-    return data?.error || fallbackMessage;
-  };
+  // buildApiErrorMessage imported from utils.js
 
   const clearFeedback = () => {
     setError('');
@@ -921,29 +917,14 @@ function App() {
     [totalPages, catalogPage]
   );
 
-  const parsePercent = (value) => {
-    if (!value) {
-      return null;
-    }
-
-    const match = String(value).match(/(\d+)/);
-    return match ? Number(match[1]) : null;
-  };
+  // parsePercent, ratingEntriesForItem imported from utils.js
 
   const getRottenTomatoesCriticsLogo = (item) => {
-    const score = parsePercent(item?.ratings?.rottenTomatoes);
-    if (score === null) {
-      return null;
-    }
-
-    if (score < 60) {
-      return ratingLogos.rtRotten;
-    }
-
-    if (item.mediaType === 'movie') {
-      return score >= 90 ? ratingLogos.rtMovieCertified : ratingLogos.rtMovieFresh;
-    }
-
+    const type = getRottenTomatoesType(parsePercent(item?.ratings?.rottenTomatoes), item?.mediaType);
+    if (!type) return null;
+    if (type === 'rotten') return ratingLogos.rtRotten;
+    if (type === 'certified') return ratingLogos.rtMovieCertified;
+    if (type === 'fresh-movie') return ratingLogos.rtMovieFresh;
     return ratingLogos.rtTvFresh;
   };
 
@@ -967,16 +948,7 @@ function App() {
     return null;
   };
 
-  const ratingEntriesForItem = (item) => {
-    const ratings = item.ratings || {};
-    const clean = (v) => (v && v !== 'N/A' ? v : null);
-    return [
-      { key: 'tmdb', label: 'TMDb', value: ratings.tmdb ? String(Number(ratings.tmdb).toFixed(1)) : null },
-      { key: 'imdb', label: 'IMDb', value: clean(ratings.imdb) },
-      { key: 'rottenTomatoes', label: 'Critics', value: clean(ratings.rottenTomatoes) },
-      { key: 'metacritic', label: 'Metacritic', value: clean(ratings.metacritic) },
-    ].filter((entry) => entry.value);
-  };
+  // ratingEntriesForItem imported from utils.js
 
   useEffect(() => {
     const restoreSession = async () => {
