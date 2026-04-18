@@ -1,4 +1,4 @@
-# 🎬 MovieKnight
+# 🎬 StreamScore
 
 A full-stack streaming catalog app that lets you pick your streaming services and browse movies & TV shows with aggregated ratings from IMDb, Rotten Tomatoes, Metacritic, and TMDb — all in one place.
 
@@ -39,7 +39,7 @@ A full-stack streaming catalog app that lets you pick your streaming services an
 | Rate limiting | `express-rate-limit` (20 req / 15 min on auth) |
 | Caching | Daily catalog cache in SQLite with background hydration |
 
-### iOS (`MovieKnight/`)
+### iOS (`StreamScore/`)
 - Swift / SwiftUI
 - Core Data
 - Companion to the web app
@@ -49,7 +49,7 @@ A full-stack streaming catalog app that lets you pick your streaming services an
 ## Project Structure
 
 ```
-MovieKnight/
+StreamScore/
 ├── backend/              # Node/Express API server
 │   ├── index.js          # Express app, routes, auth
 │   ├── catalogCache.js   # SQLite catalog caching & rating hydration
@@ -61,8 +61,8 @@ MovieKnight/
 │   │   └── logos/        # Rating & platform logo assets
 │   └── package.json
 ├── logo/                 # Source logo assets
-├── MovieKnight/          # iOS Swift app
-├── MovieKnight.xcodeproj/
+├── StreamScore/          # iOS Swift app
+├── StreamScore.xcodeproj/
 └── README.md
 ```
 

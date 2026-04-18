@@ -1145,7 +1145,7 @@ function App() {
       <div style={styles.container} className="mk-container">
         <div style={{ ...styles.card, ...styles.authCard }} className="mk-card mk-card-auth">
           <div style={styles.authMeta}>
-            <div style={styles.eyebrow}>MovieKnight</div>
+            <div style={styles.eyebrow}>StreamScore</div>
             <h1 style={styles.title}>Restoring session</h1>
             <p style={styles.subtitle}>Checking your saved sign-in state and loading your account.</p>
           </div>
@@ -1162,7 +1162,7 @@ function App() {
         <div style={styles.shell} className="mk-shell">
           <div style={{ ...styles.card, ...styles.authCard }} className="mk-card mk-card-auth fade-in">
             <div style={styles.authMeta}>
-              <div style={styles.eyebrow}>🎬 MovieKnight</div>
+              <div style={styles.eyebrow}>🎬 StreamScore</div>
               <h1 style={styles.title}>{isRegister ? 'Create your account' : 'Sign in'}</h1>
               <p style={styles.subtitle}>
                 {isRegister
@@ -1240,7 +1240,7 @@ function App() {
                 <div style={styles.eyebrow}>Streaming Setup</div>
                 <h1 style={styles.title}>{showSettings ? 'Edit your services' : 'Choose your streaming platforms'}</h1>
                 <p style={styles.subtitle}>
-                  Signed in as {username || 'your account'}. Select every service you want MovieKnight to search.
+                  Signed in as {username || 'your account'}. Select every service you want StreamScore to search.
                 </p>
               </div>
               <div style={styles.topActions} className="top-actions-wrap">
@@ -1329,7 +1329,7 @@ function App() {
             <div style={styles.headerRow} className="header-row-wrap">
               <div style={styles.headingGroup}>
                 <div style={styles.eyebrow}>🎬 Catalog</div>
-                <h1 style={styles.title}>MovieKnight</h1>
+                <h1 style={styles.title}>StreamScore</h1>
                 <p style={styles.subtitle}>Live movies &amp; TV from your selected streaming services.</p>
               </div>
               <div style={styles.topActions} className="top-actions-wrap">

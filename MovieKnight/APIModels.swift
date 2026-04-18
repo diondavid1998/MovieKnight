@@ -5,6 +5,7 @@ import Foundation
 struct API {
     // For Simulator use localhost. For a physical device, replace with your Mac's LAN IP, e.g. "http://192.168.1.100:4000"
     static let baseURL = "http://localhost:4000"
+    static let appName = "StreamScore"
 }
 
 // MARK: - Errors

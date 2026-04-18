@@ -1,6 +1,6 @@
 //
-//  MovieKnightApp.swift
-//  MovieKnight
+//  StreamScoreApp.swift
+//  StreamScore
 //
 //  Created by Dion David on 4/7/26.
 //
@@ -8,7 +8,7 @@
 import SwiftUI
 
 @main
-struct MovieKnightApp: App {
+struct StreamScoreApp: App {
     var body: some Scene {
         WindowGroup {
             ContentView()

@@ -1,13 +1,13 @@
 //
-//  MovieKnightUITests.swift
-//  MovieKnightUITests
+//  StreamScoreUITests.swift
+//  StreamScoreUITests
 //
 //  Created by Dion David on 4/7/26.
 //
 
 import XCTest
 
-final class MovieKnightUITests: XCTestCase {
+final class StreamScoreUITests: XCTestCase {
 
     override func setUpWithError() throws {
         // Put setup code here. This method is called before the invocation of each test method in the class.

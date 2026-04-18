@@ -1,13 +1,13 @@
 //
-//  MovieKnightUITestsLaunchTests.swift
-//  MovieKnightUITests
+//  StreamScoreUITestsLaunchTests.swift
+//  StreamScoreUITests
 //
 //  Created by Dion David on 4/7/26.
 //
 
 import XCTest
 
-final class MovieKnightUITestsLaunchTests: XCTestCase {
+final class StreamScoreUITestsLaunchTests: XCTestCase {
 
     override class var runsForEachTargetApplicationUIConfiguration: Bool {
         true

@@ -1,6 +1,6 @@
 //
 //  ContentView.swift
-//  MovieKnight
+//  StreamScore
 //
 //  Created by Dion David on 4/7/26.
 //
@@ -64,7 +64,7 @@ struct LoadingView: View {
     var body: some View {
         VStack(spacing: 16) {
             Text("🎬").font(.system(size: 64))
-            Text("MovieKnight")
+            Text("StreamScore")
                 .font(.system(size: 30, weight: .bold, design: .rounded))
                 .foregroundStyle(LinearGradient(colors: [.mkAccent, .mkAccentAlt], startPoint: .leading, endPoint: .trailing))
             ProgressView().tint(.mkAccent).padding(.top, 8)
@@ -92,7 +92,7 @@ struct AuthView: View {
                     Text("🎬")
                         .font(.system(size: 68))
                         .padding(.top, 60)
-                    Text("MovieKnight")
+                    Text("StreamScore")
                         .font(.system(size: 34, weight: .bold, design: .rounded))
                         .foregroundStyle(
                             LinearGradient(colors: [.mkAccent, .mkAccentAlt], startPoint: .leading, endPoint: .trailing)
@@ -216,7 +216,7 @@ struct PlatformsView: View {
             } else {
                 ScrollView {
                     VStack(spacing: 20) {
-                        Text("Select every service you subscribe to. MovieKnight will show titles available across your chosen platforms.")
+                        Text("Select every service you subscribe to. StreamScore will show titles available across your chosen platforms.")
                             .font(.subheadline)
                             .foregroundColor(.mkMuted)
                             .multilineTextAlignment(.center)
@@ -386,7 +386,7 @@ struct CatalogView: View {
     var topBar: some View {
         HStack(alignment: .center, spacing: 10) {
             VStack(alignment: .leading, spacing: 2) {
-                Text("🎬 MOVIEKNIGHT")
+                Text("🎬 STREAMSCORE")
                     .font(.system(size: 11, weight: .semibold)).kerning(1.2)
                     .foregroundColor(.mkAccent)
                 Text("Streaming Catalog")
