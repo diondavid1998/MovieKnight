@@ -463,7 +463,7 @@ struct CatalogView: View {
     var emptyState: some View {
         Spacer()
         return VStack(spacing: 14) {
-            Image(systemName: "film.slash").font(.system(size: 44)).foregroundColor(.mkMuted)
+            Image(systemName: "popcorn").font(.system(size: 44)).foregroundColor(.mkMuted)
             Text("No titles found").font(.title3).bold().foregroundColor(.mkMuted)
             Text("Adjust your filters or add streaming services.").font(.subheadline).foregroundColor(.mkMuted.opacity(0.7)).multilineTextAlignment(.center).padding(.horizontal, 40)
             MKButton(label: "Edit Services", icon: "gearshape.fill") { showSettings = true }
