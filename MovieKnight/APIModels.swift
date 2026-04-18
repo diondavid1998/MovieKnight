@@ -71,9 +71,16 @@ extension CatalogItem: Codable {
     enum CodingKeys: String, CodingKey {
         case id, title, mediaType, year, overview, posterUrl, genres, availableOn
         case popularity, tmdbRating, tmdbVotes
-        case imdbRating, imdbVotes
-        case rottenTomatoesRating, rottenTomatoesAudience
-        case metacriticRating, metacriticAudience
+        // Backend nests all third-party ratings inside a "ratings" object
+        case ratings
+    }
+
+    // Keys inside the nested "ratings" object sent by the backend
+    private enum RatingKeys: String, CodingKey {
+        case tmdb
+        case imdb
+        case rottenTomatoes
+        case metacritic
     }
 
     init(from decoder: Decoder) throws {
@@ -86,22 +93,34 @@ extension CatalogItem: Codable {
         } else {
             id = UUID().uuidString
         }
-        title                  = (try? c.decode(String.self,   forKey: .title))                  ?? "Unknown Title"
-        mediaType              = try? c.decode(String.self,    forKey: .mediaType)
-        year                   = try? c.decode(Int.self,       forKey: .year)
-        overview               = try? c.decode(String.self,    forKey: .overview)
-        posterUrl              = try? c.decode(String.self,    forKey: .posterUrl)
-        genres                 = try? c.decode([String].self,  forKey: .genres)
-        availableOn            = try? c.decode([String].self,  forKey: .availableOn)
-        popularity             = try? c.decode(Double.self,    forKey: .popularity)
-        tmdbRating             = try? c.decode(Double.self,    forKey: .tmdbRating)
-        tmdbVotes              = try? c.decode(Int.self,       forKey: .tmdbVotes)
-        imdbRating             = try? c.decode(String.self,    forKey: .imdbRating)
-        imdbVotes              = try? c.decode(String.self,    forKey: .imdbVotes)
-        rottenTomatoesRating   = try? c.decode(String.self,    forKey: .rottenTomatoesRating)
-        rottenTomatoesAudience = try? c.decode(String.self,    forKey: .rottenTomatoesAudience)
-        metacriticRating       = try? c.decode(String.self,    forKey: .metacriticRating)
-        metacriticAudience     = try? c.decode(String.self,    forKey: .metacriticAudience)
+        title       = (try? c.decode(String.self,   forKey: .title))   ?? "Unknown Title"
+        mediaType   = try? c.decode(String.self,    forKey: .mediaType)
+        year        = try? c.decode(Int.self,        forKey: .year)
+        overview    = try? c.decode(String.self,    forKey: .overview)
+        posterUrl   = try? c.decode(String.self,    forKey: .posterUrl)
+        genres      = try? c.decode([String].self,  forKey: .genres)
+        availableOn = try? c.decode([String].self,  forKey: .availableOn)
+        popularity  = try? c.decode(Double.self,    forKey: .popularity)
+        tmdbVotes   = try? c.decode(Int.self,       forKey: .tmdbVotes)
+
+        // Decode the nested ratings container sent by the backend
+        let r = try? c.nestedContainer(keyedBy: RatingKeys.self, forKey: .ratings)
+        // tmdbRating may be inside "ratings.tmdb" (new) or at top level "tmdbRating" (fallback)
+        tmdbRating = (try? r?.decode(Double.self, forKey: .tmdb))
+            ?? (try? c.decode(Double.self, forKey: .tmdbRating))
+
+        // Scrub empty strings – treat them as absent (backend stores "" for unhydrated items)
+        let rawImdb = try? r?.decode(String.self, forKey: .imdb)
+        imdbRating = (rawImdb?.isEmpty == false && rawImdb != "N/A") ? rawImdb : nil
+        imdbVotes = nil  // not currently returned by backend
+
+        let rawRT = try? r?.decode(String.self, forKey: .rottenTomatoes)
+        rottenTomatoesRating = (rawRT?.isEmpty == false && rawRT != "N/A") ? rawRT : nil
+        rottenTomatoesAudience = nil  // not currently returned by backend
+
+        let rawMeta = try? r?.decode(String.self, forKey: .metacritic)
+        metacriticRating = (rawMeta?.isEmpty == false && rawMeta != "N/A") ? rawMeta : nil
+        metacriticAudience = nil  // not currently returned by backend
     }
 }
 

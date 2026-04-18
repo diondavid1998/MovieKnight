@@ -967,11 +967,12 @@ function App() {
 
   const ratingEntriesForItem = (item) => {
     const ratings = item.ratings || {};
+    const clean = (v) => (v && v !== 'N/A' ? v : null);
     return [
       { key: 'tmdb', label: 'TMDb', value: ratings.tmdb ? String(Number(ratings.tmdb).toFixed(1)) : null },
-      { key: 'imdb', label: 'IMDb', value: ratings.imdb },
-      { key: 'rottenTomatoes', label: 'Critics', value: ratings.rottenTomatoes },
-      { key: 'metacritic', label: 'Metacritic', value: ratings.metacritic },
+      { key: 'imdb', label: 'IMDb', value: clean(ratings.imdb) },
+      { key: 'rottenTomatoes', label: 'Critics', value: clean(ratings.rottenTomatoes) },
+      { key: 'metacritic', label: 'Metacritic', value: clean(ratings.metacritic) },
     ].filter((entry) => entry.value);
   };
 

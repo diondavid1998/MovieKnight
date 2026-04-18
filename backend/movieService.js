@@ -179,9 +179,10 @@ async function fetchOmdbRatings(imdbId) {
     setCacheEntry(omdbCache, cacheKey, ratings);
     return ratings;
   } catch (error) {
-    const fallback = buildRatingsPayload({});
-    setCacheEntry(omdbCache, cacheKey, fallback, 60 * 1000);
-    return fallback;
+    // On network / rate-limit errors, return null so the caller skips this update.
+    // This keeps rating_imdb as NULL (not '') so the item stays in the hydration queue.
+    console.warn(`OMDB fetch failed for ${imdbId}: ${error.message}`);
+    return null;
   }
 }
 

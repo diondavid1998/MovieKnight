@@ -272,7 +272,11 @@ async function hydrateScopeRatings(db, scopeKey) {
          WHERE scope_key = ?
            AND imdb_id IS NOT NULL
            AND imdb_id != ''
-           AND (rating_imdb IS NULL OR rating_rt IS NULL OR rating_meta IS NULL)
+           AND (
+             rating_imdb IS NULL OR rating_imdb = '' OR
+             rating_rt   IS NULL OR rating_rt   = '' OR
+             rating_meta IS NULL OR rating_meta = ''
+           )
          LIMIT ?`,
         [scopeKey, HYDRATION_BATCH_SIZE]
       );
@@ -286,10 +290,12 @@ async function hydrateScopeRatings(db, scopeKey) {
         updates = (await mapWithConcurrency(
           rows,
           HYDRATION_CONCURRENCY,
-          async (row) => ({
-            ...row,
-            ratings: await fetchOmdbRatings(row.imdb_id),
-          })
+          async (row) => {
+            const ratings = await fetchOmdbRatings(row.imdb_id);
+            // null means network/rate-limit error — skip so item stays in hydration queue
+            if (ratings === null) return null;
+            return { ...row, ratings };
+          }
         )).filter(Boolean);
         consecutiveErrors = 0;
       } catch (error) {
@@ -616,7 +622,11 @@ async function readCachedCatalog(
     availableOnKeys: JSON.parse(row.available_on_keys_json || '[]'),
   }));
 
-  if (rows.some((row) => row.imdb_id && (!row.rating_imdb || !row.rating_rt || !row.rating_meta))) {
+  if (rows.some((row) => row.imdb_id && (
+    row.rating_imdb == null || row.rating_imdb === '' ||
+    row.rating_rt   == null || row.rating_rt   === '' ||
+    row.rating_meta == null || row.rating_meta === ''
+  ))) {
     hydrateScopeRatings(db, scopeKey).catch((error) => {
       console.error(`Deferred rating hydration failed for ${scopeKey}:`, error);
     });
