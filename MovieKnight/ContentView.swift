@@ -775,7 +775,7 @@ struct MKTextField: View {
                 SecureField(placeholder, text: $text).focused($focused)
             } else {
                 TextField(placeholder, text: $text)
-                    .textInputAutocapitalization(.never).autocorrectionDisabled().focused($focused)
+                    .disableAutocap().autocorrectionDisabled().focused($focused)
             }
         }
         .foregroundColor(.mkText)
@@ -852,15 +852,23 @@ struct ScaleButtonStyle: ButtonStyle {
 extension View {
     @ViewBuilder
     func scrollBounceBasedOnSize() -> some View {
+        #if os(iOS)
         if #available(iOS 16.4, *) {
             self.scrollBounceBehavior(.basedOnSize)
         } else {
             self
         }
+        #else
+        self
+        #endif
     }
 
     @ViewBuilder
-    func if16_4<Content: View>(@ViewBuilder transform: (Self) -> Content) -> some View {
-        if #available(iOS 16.4, *) { transform(self) } else { self }
+    func disableAutocap() -> some View {
+        #if os(iOS)
+        self.textInputAutocapitalization(.never)
+        #else
+        self
+        #endif
     }
 }
