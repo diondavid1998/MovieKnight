@@ -107,6 +107,7 @@ extension CatalogItem: Codable {
 
 struct CatalogMeta: Codable {
     let page: Int?
+    let totalPages: Int?
     let resultCount: Int?
     let visibleCount: Int?
     let platformCount: Int?
@@ -116,9 +117,12 @@ struct CatalogMeta: Codable {
 }
 
 struct CatalogResponse: Codable {
-    let movies: [CatalogItem]?
+    let items: [CatalogItem]?   // backend returns "items"
+    let movies: [CatalogItem]?  // fallback key
     let meta: CatalogMeta?
     let error: String?
+
+    var catalog: [CatalogItem] { items ?? movies ?? [] }
 }
 
 // MARK: - API Service
@@ -128,30 +132,39 @@ final class APIService {
     private init() {}
 
     func get<T: Decodable>(_ path: String, params: [String: String] = [:], token: String? = nil) async throws -> T {
-        var components = URLComponents(string: API.baseURL + path)!
+        guard var components = URLComponents(string: API.baseURL + path) else {
+            throw APIError.networkError(URLError(.badURL))
+        }
         if !params.isEmpty {
             components.queryItems = params.map { URLQueryItem(name: $0.key, value: $0.value) }
         }
-        var req = URLRequest(url: components.url!, timeoutInterval: 30)
+        guard let url = components.url else { throw APIError.networkError(URLError(.badURL)) }
+        var req = URLRequest(url: url, timeoutInterval: 30)
         req.httpMethod = "GET"
-        if let t = token { req.setValue("Bearer \(t)", forHTTPHeaderField: "Authorization") }
+        if let t = token, !t.isEmpty { req.setValue("Bearer \(t)", forHTTPHeaderField: "Authorization") }
         return try await perform(req)
     }
 
     func post<T: Decodable>(_ path: String, body: [String: Any], token: String? = nil) async throws -> T {
-        var req = URLRequest(url: URL(string: API.baseURL + path)!, timeoutInterval: 30)
+        guard let url = URL(string: API.baseURL + path) else {
+            throw APIError.networkError(URLError(.badURL))
+        }
+        var req = URLRequest(url: url, timeoutInterval: 30)
         req.httpMethod = "POST"
         req.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        if let t = token { req.setValue("Bearer \(t)", forHTTPHeaderField: "Authorization") }
+        if let t = token, !t.isEmpty { req.setValue("Bearer \(t)", forHTTPHeaderField: "Authorization") }
         req.httpBody = try JSONSerialization.data(withJSONObject: body)
         return try await perform(req)
     }
 
     func put<T: Decodable>(_ path: String, body: [String: Any], token: String? = nil) async throws -> T {
-        var req = URLRequest(url: URL(string: API.baseURL + path)!, timeoutInterval: 30)
+        guard let url = URL(string: API.baseURL + path) else {
+            throw APIError.networkError(URLError(.badURL))
+        }
+        var req = URLRequest(url: url, timeoutInterval: 30)
         req.httpMethod = "PUT"
         req.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        if let t = token { req.setValue("Bearer \(t)", forHTTPHeaderField: "Authorization") }
+        if let t = token, !t.isEmpty { req.setValue("Bearer \(t)", forHTTPHeaderField: "Authorization") }
         req.httpBody = try JSONSerialization.data(withJSONObject: body)
         return try await perform(req)
     }

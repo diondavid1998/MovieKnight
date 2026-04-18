@@ -18,23 +18,36 @@ final class AppState: ObservableObject {
     @Published var username: String = ""
     @Published var selectedPlatforms: [String] = []
 
+    private let tokenKey    = "mk_token"
+    private let usernameKey = "mk_username"
+    private let platformsKey = "mk_platforms"
+
     init() {
-        token    = UserDefaults.standard.string(forKey: "mk_token")    ?? ""
-        username = UserDefaults.standard.string(forKey: "mk_username") ?? ""
+        token    = UserDefaults.standard.string(forKey: tokenKey)?.trimmingCharacters(in: .whitespaces) ?? ""
+        username = UserDefaults.standard.string(forKey: usernameKey) ?? ""
+        selectedPlatforms = UserDefaults.standard.stringArray(forKey: platformsKey) ?? []
         page = token.isEmpty ? .auth : .catalog
     }
 
-    func saveSession(token: String, username: String) {
-        self.token    = token
+    func saveSession(token: String, username: String, isNewUser: Bool = false) {
+        self.token    = token.trimmingCharacters(in: .whitespaces)
         self.username = username
-        UserDefaults.standard.set(token,    forKey: "mk_token")
-        UserDefaults.standard.set(username, forKey: "mk_username")
+        UserDefaults.standard.set(self.token, forKey: tokenKey)
+        UserDefaults.standard.set(username,   forKey: usernameKey)
+        // New users go through platform setup first
+        page = isNewUser ? .platforms : .catalog
+    }
+
+    func savePlatforms(_ platforms: [String]) {
+        selectedPlatforms = platforms
+        UserDefaults.standard.set(platforms, forKey: platformsKey)
     }
 
     func logout() {
         token = ""; username = ""; selectedPlatforms = []
-        UserDefaults.standard.removeObject(forKey: "mk_token")
-        UserDefaults.standard.removeObject(forKey: "mk_username")
+        UserDefaults.standard.removeObject(forKey: tokenKey)
+        UserDefaults.standard.removeObject(forKey: usernameKey)
+        UserDefaults.standard.removeObject(forKey: platformsKey)
         page = .auth
     }
 }
@@ -163,17 +176,21 @@ struct AuthView: View {
     }
 
     func authenticate() async {
-        guard !username.trimmingCharacters(in: .whitespaces).isEmpty,
-              !password.isEmpty else { errorMsg = "Please fill in both fields."; return }
+        let trimmedUser = username.trimmingCharacters(in: .whitespaces)
+        guard !trimmedUser.isEmpty, !password.isEmpty else {
+            errorMsg = "Please fill in both fields."; return
+        }
+        guard trimmedUser.count >= 3 else {
+            errorMsg = "Username must be at least 3 characters."; return
+        }
         isLoading = true; errorMsg = nil
         do {
             let resp: AuthResponse = try await APIService.shared.post(
                 mode == .login ? "/login" : "/register",
-                body: ["username": username, "password": password]
+                body: ["username": trimmedUser, "password": password]
             )
             if let t = resp.token {
-                app.saveSession(token: t, username: username)
-                app.page = .catalog
+                app.saveSession(token: t, username: trimmedUser, isNewUser: mode == .register)
             } else {
                 errorMsg = resp.error ?? "Authentication failed."
             }
@@ -262,24 +279,31 @@ struct PlatformsView: View {
         .task { await load() }
     }
 
-    func load() async {
-        isLoading = true
-        if let resp = try? await APIService.shared.get("/platforms", token: app.token) as PlatformResponse {
+    @MainActor func load() async {
+        isLoading = true; errorMsg = nil
+        do {
+            let resp: PlatformResponse = try await APIService.shared.get("/platforms", token: app.token)
             selected = Set(resp.platforms)
-            app.selectedPlatforms = resp.platforms
+            app.savePlatforms(resp.platforms)
+        } catch {
+            // Pre-fill with locally cached platforms if network fails
+            if !app.selectedPlatforms.isEmpty {
+                selected = Set(app.selectedPlatforms)
+            } else {
+                errorMsg = "Couldn't load saved services. Select yours below."
+            }
         }
         isLoading = false
     }
 
-    func save() async {
+    @MainActor func save() async {
         guard !selected.isEmpty else { errorMsg = "Select at least one service."; return }
         isSaving = true; errorMsg = nil
-        // Save locally first so navigation always works
-        app.selectedPlatforms = Array(selected)
-        // Try to sync with backend (non-blocking — failure won't stop navigation)
-        _ = try? await APIService.shared.put(
+        let platforms = Array(selected)
+        app.savePlatforms(platforms)                          // persist locally immediately
+        _ = try? await APIService.shared.put(                 // best-effort sync to backend
             "/platforms",
-            body: ["platforms": Array(selected)],
+            body: ["platforms": platforms],
             token: app.token
         ) as GenericResponse
         app.page = .catalog
@@ -350,7 +374,7 @@ struct CatalogView: View {
 
             filterBar.padding(.bottom, 8)
 
-            Divider().background(Color.mkBorder.opacity(0.4))
+            Divider().overlay(Color.mkBorder)
 
             if isLoading {
                 Spacer()
@@ -378,8 +402,13 @@ struct CatalogView: View {
             PlatformsView().environmentObject(app)
         }
         .task {
+            // Load platforms from backend if not cached, then fetch catalog
             if app.selectedPlatforms.isEmpty { await loadPlatforms() }
             await fetch()
+        }
+        .onChange(of: showSettings) { open in
+            // Refresh catalog when returning from settings sheet
+            if !open { Task { await fetch() } }
         }
     }
 
@@ -503,25 +532,32 @@ struct CatalogView: View {
 
     // MARK: Networking
 
-    func loadPlatforms() async {
-        if let resp = try? await APIService.shared.get("/platforms", token: app.token) as PlatformResponse {
-            app.selectedPlatforms = resp.platforms
+    @MainActor func loadPlatforms() async {
+        do {
+            let resp: PlatformResponse = try await APIService.shared.get("/platforms", token: app.token)
+            app.savePlatforms(resp.platforms)
+        } catch {
+            // Use cached platforms — no action needed
         }
     }
 
-    func fetch() async {
+    @MainActor func fetch() async {
         isLoading = true; errorMsg = nil
-        var params: [String: String] = ["page": String(page), "sort": sortBy, "type": mediaType]
+        // Use correct backend query param names
+        var params: [String: String] = [
+            "page":      String(page),
+            "sortBy":    sortBy,
+            "mediaType": mediaType
+        ]
         if !app.selectedPlatforms.isEmpty {
-            params["services"] = app.selectedPlatforms.joined(separator: ",")
+            params["serviceFilters"] = app.selectedPlatforms.joined(separator: ",")
         }
         do {
             let resp: CatalogResponse = try await APIService.shared.get("/movies", params: params, token: app.token)
-            movies = resp.movies ?? []
+            movies = resp.catalog
             meta   = resp.meta
-            if let count = resp.meta?.resultCount {
-                totalPages = max(1, Int(ceil(Double(count) / 20.0)))
-            }
+            // Use totalPages directly from backend meta
+            totalPages = resp.meta?.totalPages ?? max(1, Int(ceil(Double(resp.meta?.resultCount ?? 0) / 24.0)))
         } catch APIError.unauthorized {
             app.logout()
         } catch {
@@ -658,9 +694,12 @@ struct MovieCardView: View {
                              color: Color(red: 0.945, green: 0.702, blue: 0.102)))
         }
         if let v = movie.rottenTomatoesRating, !v.isEmpty, v != "N/A" {
-            let pct = Int(v.replacingOccurrences(of: "%", with: "")) ?? 0
+            // Strip any non-numeric suffix (e.g. "75%" or "75% Fresh")
+            let numStr = v.components(separatedBy: CharacterSet.decimalDigits.inverted).joined()
+            let pct = Int(numStr) ?? 0
             let fresh = pct >= 60
-            out.append(.init(label: "RT", value: v, logoAsset: fresh ? "rt_fresh" : "rt_rotten",
+            out.append(.init(label: "RT", value: v.hasPrefix(numStr) ? "\(pct)%" : v,
+                             logoAsset: fresh ? "rt_fresh" : "rt_rotten",
                              color: fresh ? Color(red: 0.98, green: 0.36, blue: 0.22) : Color(red: 0.5, green: 0.7, blue: 0.22)))
         }
         if let v = movie.metacriticRating, !v.isEmpty, v != "N/A" {
