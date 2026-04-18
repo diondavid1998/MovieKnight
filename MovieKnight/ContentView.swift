@@ -272,18 +272,17 @@ struct PlatformsView: View {
     }
 
     func save() async {
+        guard !selected.isEmpty else { errorMsg = "Select at least one service."; return }
         isSaving = true; errorMsg = nil
-        do {
-            let _: GenericResponse = try await APIService.shared.put(
-                "/platforms",
-                body: ["platforms": Array(selected)],
-                token: app.token
-            )
-            app.selectedPlatforms = Array(selected)
-            app.page = .catalog
-        } catch {
-            errorMsg = "Failed to save. Try again."
-        }
+        // Save locally first so navigation always works
+        app.selectedPlatforms = Array(selected)
+        // Try to sync with backend (non-blocking — failure won't stop navigation)
+        _ = try? await APIService.shared.put(
+            "/platforms",
+            body: ["platforms": Array(selected)],
+            token: app.token
+        ) as GenericResponse
+        app.page = .catalog
         isSaving = false
     }
 }
