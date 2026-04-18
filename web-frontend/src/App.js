@@ -545,12 +545,12 @@ const styles = {
 const streamingPlatforms = [
   { key: 'netflix', name: 'Netflix', logo: require('./logos/netflix.png') },
   { key: 'hulu', name: 'Hulu', logo: require('./logos/hulu.jpeg') },
-  { key: 'prime', name: 'Prime Video', logo: require('./logos/prime.jpeg') },
-  { key: 'disney', name: 'Disney+', logo: require('./logos/disney+.jpeg') },
+  { key: 'prime', name: 'Prime Video', logo: require('./logos/prime.png') },
+  { key: 'disney', name: 'Disney+', logo: require('./logos/disney+.png') },
   { key: 'paramount', name: 'Paramount+', logo: require('./logos/paramount+.jpeg') },
   { key: 'peacock', name: 'Peacock', logo: require('./logos/peacock.png') },
-  { key: 'max', name: 'Max', logo: require('./logos/max.jpeg') },
-  { key: 'crunchyroll', name: 'Crunchyroll', logo: require('./logos/crunchyroll.jpeg') },
+  { key: 'max', name: 'Max', logo: require('./logos/max.png') },
+  { key: 'crunchyroll', name: 'Crunchyroll', logo: require('./logos/crunchyroll.png') },
 ];
 
 const ratingLogos = {
