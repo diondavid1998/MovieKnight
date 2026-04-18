@@ -105,6 +105,17 @@ body {
   box-shadow: 0 0 0 3px rgba(233, 69, 96, 0.12);
 }
 
+/* ── Override browser autofill white/yellow background ── */
+.mk-input:-webkit-autofill,
+.mk-input:-webkit-autofill:hover,
+.mk-input:-webkit-autofill:focus,
+.mk-input:-webkit-autofill:active {
+  -webkit-box-shadow: 0 0 0 1000px rgba(16, 19, 28, 0.98) inset !important;
+  -webkit-text-fill-color: #eef0f7 !important;
+  caret-color: #eef0f7;
+  transition: background-color 9999s ease-in-out 0s;
+}
+
 /* ── Mobile (iPhone) ─────────────────────────────────── */
 @media (max-width: 640px) {
 

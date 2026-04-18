@@ -1667,6 +1667,10 @@ function App() {
                               );
                             })}
                           </div>
+                        ) : catalogMeta?.refreshing ? (
+                          <div style={{ fontSize: 11, color: 'rgba(110,122,147,0.7)', marginTop: 8 }}>
+                            ⏳ Ratings loading…
+                          </div>
                         ) : null}
                       </div>
                     </div>
