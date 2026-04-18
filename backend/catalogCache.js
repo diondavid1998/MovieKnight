@@ -1,0 +1,688 @@
+const { fetchCatalogByPlatforms, fetchOmdbRatings, fetchTitleDetails } = require('./movieService');
+
+const CATALOG_SYNC_HOURS = Math.max(Number(process.env.CATALOG_SYNC_HOURS) || 24, 1);
+const DAILY_SYNC_MS = CATALOG_SYNC_HOURS * 60 * 60 * 1000;
+const DEFAULT_REGION = 'US';
+const syncLocks = new Map();
+const ratingHydrationLocks = new Map();
+const identifierBackfillLocks = new Map();
+let writeQueue = Promise.resolve();
+const HYDRATION_BATCH_SIZE = 40;
+const HYDRATION_CONCURRENCY = 4;
+
+function run(db, sql, params = []) {
+  return new Promise((resolve, reject) => {
+    db.run(sql, params, function onRun(err) {
+      if (err) {
+        reject(err);
+        return;
+      }
+
+      resolve(this);
+    });
+  });
+}
+
+function get(db, sql, params = []) {
+  return new Promise((resolve, reject) => {
+    db.get(sql, params, (err, row) => {
+      if (err) {
+        reject(err);
+        return;
+      }
+
+      resolve(row);
+    });
+  });
+}
+
+function all(db, sql, params = []) {
+  return new Promise((resolve, reject) => {
+    db.all(sql, params, (err, rows) => {
+      if (err) {
+        reject(err);
+        return;
+      }
+
+      resolve(rows);
+    });
+  });
+}
+
+function enqueueWrite(operation) {
+  const next = writeQueue.then(operation);
+  writeQueue = next.catch(() => {});
+  return next;
+}
+
+async function mapWithConcurrency(items, concurrency, mapper) {
+  const results = new Array(items.length);
+  let nextIndex = 0;
+
+  async function worker() {
+    while (nextIndex < items.length) {
+      const currentIndex = nextIndex;
+      nextIndex += 1;
+      results[currentIndex] = await mapper(items[currentIndex], currentIndex);
+    }
+  }
+
+  const workerCount = Math.min(concurrency, items.length);
+  await Promise.all(Array.from({ length: workerCount }, () => worker()));
+  return results;
+}
+
+function isRateLimitError(error) {
+  return /too many requests|rate limit/i.test(String(error?.message || error));
+}
+
+function buildScopeKey(platforms, region = DEFAULT_REGION) {
+  const normalizedPlatforms = [...new Set(platforms)].sort();
+  return `region:${region}|platforms:${normalizedPlatforms.join(',')}`;
+}
+
+async function ensureCatalogTables(db) {
+  await run(
+    db,
+    `CREATE TABLE IF NOT EXISTS catalog_cache_entries (
+      scope_key TEXT NOT NULL,
+      media_type TEXT NOT NULL,
+      tmdb_id INTEGER NOT NULL,
+      title TEXT NOT NULL,
+      overview TEXT,
+      release_date TEXT,
+      year TEXT,
+      poster_url TEXT,
+      backdrop_path TEXT,
+      tmdb_rating REAL,
+      tmdb_vote_count INTEGER,
+      popularity REAL,
+      original_language TEXT,
+      genres_json TEXT DEFAULT '[]',
+      imdb_id TEXT,
+      rating_imdb TEXT,
+      rating_imdb_num REAL,
+      rating_rt TEXT,
+      rating_rt_num REAL,
+      rating_meta TEXT,
+      rating_meta_num REAL,
+      available_on_json TEXT DEFAULT '[]',
+      available_on_keys_json TEXT DEFAULT '[]',
+      updated_at TEXT NOT NULL,
+      PRIMARY KEY (scope_key, media_type, tmdb_id)
+    )`
+  );
+
+  await run(
+    db,
+    `CREATE TABLE IF NOT EXISTS catalog_cache_state (
+      scope_key TEXT PRIMARY KEY,
+      platforms_json TEXT NOT NULL,
+      languages_json TEXT NOT NULL,
+      region TEXT NOT NULL,
+      last_synced_at TEXT,
+      item_count INTEGER DEFAULT 0
+    )`
+  );
+}
+
+function isScopeStale(stateRow) {
+  if (!stateRow?.last_synced_at) {
+    return true;
+  }
+
+  return Date.now() - new Date(stateRow.last_synced_at).getTime() >= DAILY_SYNC_MS;
+}
+
+async function syncScope(db, { platforms, languages, region = DEFAULT_REGION }) {
+  const scopeKey = buildScopeKey(platforms, region);
+  if (syncLocks.has(scopeKey)) {
+    return syncLocks.get(scopeKey);
+  }
+
+  const syncPromise = (async () => {
+    const catalog = await fetchCatalogByPlatforms(platforms, {
+      mediaType: 'all',
+      sortBy: 'popularity',
+      limit: 300,
+      page: 1,
+      pageCount: 6,
+      region,
+      includeRatings: false,
+      includeExternalIds: true,
+      snapshotMode: true,
+    });
+
+    await enqueueWrite(async () => {
+      await run(db, 'BEGIN IMMEDIATE TRANSACTION');
+      try {
+        await run(db, 'DELETE FROM catalog_cache_entries WHERE scope_key = ?', [scopeKey]);
+
+        for (const item of catalog.items) {
+          await run(
+            db,
+            `INSERT OR REPLACE INTO catalog_cache_entries (
+              scope_key, media_type, tmdb_id, title, overview, release_date, year, poster_url, backdrop_path,
+              tmdb_rating, tmdb_vote_count, popularity, original_language, genres_json, imdb_id, rating_imdb,
+              rating_imdb_num, rating_rt, rating_rt_num, rating_meta, rating_meta_num, available_on_json,
+              available_on_keys_json, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+            [
+              scopeKey,
+              item.mediaType,
+              item.tmdbId,
+              item.title,
+              item.overview || '',
+              item.releaseDate || null,
+              item.year || null,
+              item.posterUrl || null,
+              item.backdropPath || null,
+              item.ratings?.tmdb || null,
+              item.tmdbVoteCount || null,
+              item.popularity || null,
+              item.originalLanguage || null,
+              JSON.stringify(item.genres || []),
+              item.imdbId || null,
+              item.ratings?.imdb || null,
+              item.sortableRatings?.imdb || null,
+              item.ratings?.rottenTomatoes || null,
+              item.sortableRatings?.rottenTomatoes || null,
+              item.ratings?.metacritic || null,
+              item.sortableRatings?.metacritic || null,
+              JSON.stringify(item.availableOn || []),
+              JSON.stringify(item.availableOnKeys || []),
+              new Date().toISOString(),
+            ]
+          );
+        }
+
+        await run(
+          db,
+          `INSERT INTO catalog_cache_state (scope_key, platforms_json, languages_json, region, last_synced_at, item_count)
+           VALUES (?, ?, ?, ?, ?, ?)
+           ON CONFLICT(scope_key) DO UPDATE SET
+             platforms_json = excluded.platforms_json,
+             languages_json = excluded.languages_json,
+             region = excluded.region,
+             last_synced_at = excluded.last_synced_at,
+             item_count = excluded.item_count`,
+          [
+            scopeKey,
+            JSON.stringify(platforms),
+            JSON.stringify(languages),
+            region,
+            new Date().toISOString(),
+            catalog.items.length,
+          ]
+        );
+
+        await run(db, 'COMMIT');
+      } catch (error) {
+        await run(db, 'ROLLBACK');
+        throw error;
+      }
+    });
+
+    hydrateScopeRatings(db, scopeKey).catch((error) => {
+      console.error(`Background rating hydration failed for ${scopeKey}:`, error);
+    });
+
+    return { scopeKey, itemCount: catalog.items.length, meta: catalog.meta };
+  })().finally(() => {
+    syncLocks.delete(scopeKey);
+  });
+
+  syncLocks.set(scopeKey, syncPromise);
+  return syncPromise;
+}
+
+async function ensureScopeSynced(db, { platforms, languages, region = DEFAULT_REGION }) {
+  const scopeKey = buildScopeKey(platforms, region);
+  const stateRow = await get(db, 'SELECT * FROM catalog_cache_state WHERE scope_key = ?', [scopeKey]);
+
+  if (!stateRow) {
+    if (!syncLocks.has(scopeKey)) {
+      syncScope(db, { platforms, languages, region }).catch((error) => {
+        console.error(`Initial catalog sync failed for ${scopeKey}:`, error);
+      });
+    }
+  } else if (isScopeStale(stateRow) && !syncLocks.has(scopeKey)) {
+    syncScope(db, { platforms, languages, region }).catch((error) => {
+      console.error(`Background catalog refresh failed for ${scopeKey}:`, error);
+    });
+  }
+
+  return scopeKey;
+}
+
+async function hydrateScopeRatings(db, scopeKey) {
+  if (ratingHydrationLocks.has(scopeKey)) {
+    return ratingHydrationLocks.get(scopeKey);
+  }
+
+  const hydrationPromise = (async () => {
+    let consecutiveErrors = 0;
+    const MAX_CONSECUTIVE_ERRORS = 5;
+
+    while (true) {
+      const rows = await all(
+        db,
+        `SELECT scope_key, media_type, tmdb_id, imdb_id
+         FROM catalog_cache_entries
+         WHERE scope_key = ?
+           AND imdb_id IS NOT NULL
+           AND imdb_id != ''
+           AND (rating_imdb IS NULL OR rating_rt IS NULL OR rating_meta IS NULL)
+         LIMIT ?`,
+        [scopeKey, HYDRATION_BATCH_SIZE]
+      );
+
+      if (!rows.length) {
+        return;
+      }
+
+      let updates;
+      try {
+        updates = (await mapWithConcurrency(
+          rows,
+          HYDRATION_CONCURRENCY,
+          async (row) => ({
+            ...row,
+            ratings: await fetchOmdbRatings(row.imdb_id),
+          })
+        )).filter(Boolean);
+        consecutiveErrors = 0;
+      } catch (error) {
+        consecutiveErrors += 1;
+        if (isRateLimitError(error) || consecutiveErrors >= MAX_CONSECUTIVE_ERRORS) {
+          console.warn(`Rating hydration paused for ${scopeKey}: ${error.message}`);
+          return;
+        }
+        continue;
+      }
+
+      if (!updates.length) {
+        return;
+      }
+
+      await enqueueWrite(async () => {
+        await run(db, 'BEGIN IMMEDIATE TRANSACTION');
+        try {
+          for (const update of updates) {
+            // Use '' (not null) for missing ratings so this entry won't re-enter the hydration queue
+            await run(
+              db,
+              `UPDATE catalog_cache_entries
+               SET rating_imdb = ?, rating_imdb_num = ?,
+                   rating_rt = ?, rating_rt_num = ?,
+                   rating_meta = ?, rating_meta_num = ?,
+                   updated_at = ?
+               WHERE scope_key = ? AND media_type = ? AND tmdb_id = ?`,
+              [
+                update.ratings.imdb ?? '',
+                toSortableRating(update.ratings.imdb),
+                update.ratings.rottenTomatoes ?? '',
+                toSortableRating(update.ratings.rottenTomatoes),
+                update.ratings.metacritic ?? '',
+                toSortableRating(update.ratings.metacritic),
+                new Date().toISOString(),
+                update.scope_key,
+                update.media_type,
+                update.tmdb_id,
+              ]
+            );
+          }
+          await run(db, 'COMMIT');
+        } catch (error) {
+          await run(db, 'ROLLBACK');
+          throw error;
+        }
+      });
+    }
+  })().finally(() => {
+    ratingHydrationLocks.delete(scopeKey);
+  });
+
+  ratingHydrationLocks.set(scopeKey, hydrationPromise);
+  return hydrationPromise;
+}
+
+async function backfillScopeIdentifiers(db, scopeKey) {
+  if (identifierBackfillLocks.has(scopeKey)) {
+    return identifierBackfillLocks.get(scopeKey);
+  }
+
+  const backfillPromise = (async () => {
+    let consecutiveErrors = 0;
+    const MAX_CONSECUTIVE_ERRORS = 5;
+
+    while (true) {
+      const rows = await all(
+        db,
+        `SELECT scope_key, media_type, tmdb_id
+         FROM catalog_cache_entries
+         WHERE scope_key = ?
+           AND COALESCE(imdb_id, '') = ''
+         LIMIT ?`,
+        [scopeKey, HYDRATION_BATCH_SIZE]
+      );
+
+      if (!rows.length) {
+        return;
+      }
+
+      let updates;
+      try {
+        updates = (await mapWithConcurrency(rows, HYDRATION_CONCURRENCY, async (row) => {
+          const details = await fetchTitleDetails(row.media_type, row.tmdb_id, {
+            includeExternalIds: true,
+          });
+
+          return {
+            ...row,
+            imdbId: details.external_ids?.imdb_id || '',
+          };
+        })).filter(Boolean);
+        consecutiveErrors = 0;
+      } catch (error) {
+        consecutiveErrors += 1;
+        if (isRateLimitError(error) || consecutiveErrors >= MAX_CONSECUTIVE_ERRORS) {
+          console.warn(`Identifier backfill paused for ${scopeKey}: ${error.message}`);
+          return;
+        }
+        continue;
+      }
+
+      if (!updates.length) {
+        return;
+      }
+
+      await enqueueWrite(async () => {
+        await run(db, 'BEGIN IMMEDIATE TRANSACTION');
+        try {
+          for (const update of updates) {
+            await run(
+              db,
+              `UPDATE catalog_cache_entries
+               SET imdb_id = ?, updated_at = ?
+               WHERE scope_key = ? AND media_type = ? AND tmdb_id = ?`,
+              [
+                update.imdbId,
+                new Date().toISOString(),
+                update.scope_key,
+                update.media_type,
+                update.tmdb_id,
+              ]
+            );
+          }
+          await run(db, 'COMMIT');
+        } catch (error) {
+          await run(db, 'ROLLBACK');
+          throw error;
+        }
+      });
+    }
+  })().finally(() => {
+    identifierBackfillLocks.delete(scopeKey);
+  });
+
+  identifierBackfillLocks.set(scopeKey, backfillPromise);
+  return backfillPromise;
+}
+
+function toSortableRating(value) {
+  if (!value || typeof value !== 'string') {
+    return null;
+  }
+
+  if (value.endsWith('%')) {
+    return Number(value.replace('%', ''));
+  }
+
+  if (value.includes('/10')) {
+    return Number(value.split('/')[0]);
+  }
+
+  if (value.includes('/100')) {
+    return Number(value.split('/')[0]);
+  }
+
+  return null;
+}
+
+function buildSortExpression(sortBy) {
+  switch (sortBy) {
+    case 'title':
+      return 'title COLLATE NOCASE ASC';
+    case 'release_date':
+      return 'release_date DESC';
+    case 'tmdb':
+      return 'tmdb_rating DESC, popularity DESC';
+    case 'imdb':
+      return 'rating_imdb_num DESC, popularity DESC';
+    case 'rotten_tomatoes':
+      return 'rating_rt_num DESC, popularity DESC';
+    case 'metacritic':
+      return 'rating_meta_num DESC, popularity DESC';
+    case 'popularity':
+    default:
+      return 'popularity DESC, tmdb_rating DESC';
+  }
+}
+
+function isRatingsSort(sortBy) {
+  return sortBy === 'imdb' || sortBy === 'rotten_tomatoes' || sortBy === 'metacritic';
+}
+
+async function readCachedCatalog(
+  db,
+  {
+    scopeKey,
+    mediaType = 'all',
+    sortBy = 'popularity',
+    page = 1,
+    pageSize = 24,
+    serviceFilters = [],
+    languageFilters = [],
+  }
+) {
+  const filters = ['scope_key = ?'];
+  const params = [scopeKey];
+  const normalizedServiceFilters = [...new Set(serviceFilters.filter(Boolean))];
+  const normalizedLanguageFilters = [...new Set(languageFilters.filter(Boolean))];
+
+  if (mediaType === 'movie' || mediaType === 'tv') {
+    filters.push('media_type = ?');
+    params.push(mediaType);
+  } else if (mediaType === 'documentary') {
+    filters.push("genres_json LIKE '%Documentary%'");
+  }
+
+  if (normalizedLanguageFilters.length) {
+    filters.push(`original_language IN (${normalizedLanguageFilters.map(() => '?').join(', ')})`);
+    params.push(...normalizedLanguageFilters);
+  }
+
+  if (normalizedServiceFilters.length) {
+    filters.push(
+      `(${normalizedServiceFilters
+        .map(() => 'available_on_keys_json LIKE ?')
+        .join(' OR ')})`
+    );
+    params.push(...normalizedServiceFilters.map((providerKey) => `%\"${providerKey}\"%`));
+  }
+
+  const whereClause = filters.join(' AND ');
+
+  const missingImdbIdsRow = await get(
+    db,
+    `SELECT COUNT(*) AS count
+     FROM catalog_cache_entries
+     WHERE ${whereClause}
+       AND COALESCE(imdb_id, '') = ''`,
+    params
+  );
+
+  if ((missingImdbIdsRow?.count || 0) > 0) {
+    backfillScopeIdentifiers(db, scopeKey).catch((error) => {
+      console.error(`Identifier backfill skipped for ${scopeKey}:`, error.message);
+    });
+  }
+
+  if (isRatingsSort(sortBy)) {
+    const missingRatingsRow = await get(
+      db,
+      `SELECT COUNT(*) AS count
+       FROM catalog_cache_entries
+       WHERE ${whereClause}
+         AND imdb_id IS NOT NULL
+         AND (
+           ${sortBy === 'imdb' ? 'rating_imdb_num' : sortBy === 'rotten_tomatoes' ? 'rating_rt_num' : 'rating_meta_num'}
+         ) IS NULL`,
+      params
+    );
+
+    if ((missingRatingsRow?.count || 0) > 0) {
+      hydrateScopeRatings(db, scopeKey).catch((error) => {
+        console.error(`Ratings hydration skipped for ${scopeKey}:`, error.message);
+      });
+    }
+  }
+
+  const sortExpression = buildSortExpression(sortBy);
+  const countRow = await get(
+    db,
+    `SELECT COUNT(*) AS count FROM catalog_cache_entries WHERE ${whereClause}`,
+    params
+  );
+  const totalCount = countRow?.count || 0;
+  const totalPages = Math.max(1, Math.ceil(totalCount / pageSize));
+  const currentPage = Math.min(Math.max(page, 1), totalPages);
+  const offset = (currentPage - 1) * pageSize;
+  const readPageRows = () =>
+    all(
+      db,
+      `SELECT * FROM catalog_cache_entries
+       WHERE ${whereClause}
+       ORDER BY ${sortExpression}
+       LIMIT ? OFFSET ?`,
+      [...params, pageSize, offset]
+    );
+
+  let rows = await readPageRows();
+
+  const items = rows.map((row) => ({
+    id: `${row.media_type}-${row.tmdb_id}`,
+    tmdbId: row.tmdb_id,
+    mediaType: row.media_type,
+    title: row.title,
+    overview: row.overview,
+    releaseDate: row.release_date,
+    year: row.year,
+    posterUrl: row.poster_url,
+    backdropPath: row.backdrop_path,
+    tmdbVoteCount: row.tmdb_vote_count,
+    popularity: row.popularity,
+    originalLanguage: row.original_language,
+    genres: JSON.parse(row.genres_json || '[]'),
+    imdbId: row.imdb_id,
+    ratings: {
+      tmdb: row.tmdb_rating,
+      imdb: row.rating_imdb,
+      rottenTomatoes: row.rating_rt,
+      metacritic: row.rating_meta,
+    },
+    sortableRatings: {
+      tmdb: row.tmdb_rating,
+      imdb: row.rating_imdb_num,
+      rottenTomatoes: row.rating_rt_num,
+      metacritic: row.rating_meta_num,
+    },
+    availableOn: JSON.parse(row.available_on_json || '[]'),
+    availableOnKeys: JSON.parse(row.available_on_keys_json || '[]'),
+  }));
+
+  if (rows.some((row) => row.imdb_id && (!row.rating_imdb || !row.rating_rt || !row.rating_meta))) {
+    hydrateScopeRatings(db, scopeKey).catch((error) => {
+      console.error(`Deferred rating hydration failed for ${scopeKey}:`, error);
+    });
+  }
+
+  const stateRow = await get(db, 'SELECT * FROM catalog_cache_state WHERE scope_key = ?', [scopeKey]);
+
+  return {
+    items,
+    meta: {
+      mediaType,
+      sortBy,
+      region: stateRow?.region || DEFAULT_REGION,
+      languages: JSON.parse(stateRow?.languages_json || '[]'),
+      activeServiceFilters: normalizedServiceFilters,
+      activeLanguageFilters: normalizedLanguageFilters,
+      page: currentPage,
+      pageSize,
+      platformCount: JSON.parse(stateRow?.platforms_json || '[]').length,
+      resultCount: totalCount,
+      visibleCount: items.length,
+      totalPages,
+      hasMore: currentPage < totalPages,
+      lastUpdatedAt: stateRow?.last_synced_at || null,
+      refreshing:
+        syncLocks.has(scopeKey) ||
+        identifierBackfillLocks.has(scopeKey) ||
+        ratingHydrationLocks.has(scopeKey),
+      cacheMode: 'daily_snapshot',
+    },
+  };
+}
+
+function nextMidnightDelayMs() {
+  const now = new Date();
+  const next = new Date(now);
+  next.setHours(24, 0, 0, 0);
+  return next.getTime() - now.getTime();
+}
+
+async function refreshAllCachedScopes(db) {
+  const rows = await all(db, 'SELECT * FROM catalog_cache_state');
+  for (const row of rows) {
+    const platforms = JSON.parse(row.platforms_json || '[]');
+    const languages = JSON.parse(row.languages_json || '[]');
+    if (!platforms.length) {
+      continue;
+    }
+
+    try {
+      await syncScope(db, {
+        platforms,
+        languages,
+        region: row.region || DEFAULT_REGION,
+      });
+    } catch (error) {
+      console.error(`Daily catalog sync failed for ${row.scope_key}:`, error);
+    }
+  }
+}
+
+function startDailyCatalogRefresh(db) {
+  const scheduleNext = () => {
+    setTimeout(async () => {
+      await refreshAllCachedScopes(db).catch((error) => {
+        console.error('Scheduled catalog refresh failed:', error);
+      });
+      scheduleNext();
+    }, nextMidnightDelayMs());
+  };
+
+  scheduleNext();
+}
+
+module.exports = {
+  DAILY_SYNC_MS,
+  ensureCatalogTables,
+  ensureScopeSynced,
+  readCachedCatalog,
+  refreshAllCachedScopes,
+  startDailyCatalogRefresh,
+  syncScope,
+};
