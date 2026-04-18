@@ -484,12 +484,14 @@ async function readCachedCatalog(
     pageSize = 24,
     serviceFilters = [],
     languageFilters = [],
+    genreFilters = [],
   }
 ) {
   const filters = ['scope_key = ?'];
   const params = [scopeKey];
   const normalizedServiceFilters = [...new Set(serviceFilters.filter(Boolean))];
   const normalizedLanguageFilters = [...new Set(languageFilters.filter(Boolean))];
+  const normalizedGenreFilters = [...new Set(genreFilters.filter(Boolean))];
 
   if (mediaType === 'movie' || mediaType === 'tv') {
     filters.push('media_type = ?');
@@ -510,6 +512,18 @@ async function readCachedCatalog(
         .join(' OR ')})`
     );
     params.push(...normalizedServiceFilters.map((providerKey) => `%\"${providerKey}\"%`));
+  }
+
+  if (normalizedGenreFilters.length) {
+    // Anime is a special case: Animation + Japanese language
+    const genreClauses = normalizedGenreFilters.map((g) => {
+      if (g === 'anime') return `(genres_json LIKE '%Animation%' AND original_language = 'ja')`;
+      return `genres_json LIKE ?`;
+    });
+    filters.push(`(${genreClauses.join(' OR ')})`);
+    normalizedGenreFilters
+      .filter((g) => g !== 'anime')
+      .forEach((g) => params.push(`%${g}%`));
   }
 
   const whereClause = filters.join(' AND ');

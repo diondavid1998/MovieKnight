@@ -212,6 +212,10 @@ app.get('/movies', authenticateToken, async (req, res) => {
       .split(',')
       .map((value) => value.trim())
       .filter(Boolean);
+    const genreFilters = String(req.query.genreFilters || '')
+      .split(',')
+      .map((value) => value.trim())
+      .filter(Boolean);
 
     console.log(`Reading cached catalog for user ${req.user.id}, platforms:`, platforms, {
       mediaType,
@@ -222,6 +226,7 @@ app.get('/movies', authenticateToken, async (req, res) => {
       languages,
       serviceFilters,
       languageFilters,
+      genreFilters,
     });
     
     try {
@@ -238,6 +243,7 @@ app.get('/movies', authenticateToken, async (req, res) => {
         pageSize: Number(limit),
         serviceFilters,
         languageFilters,
+        genreFilters,
       });
       console.log(`Returning ${catalog.items.length} catalog items to user ${req.user.id}`);
       res.json(catalog);

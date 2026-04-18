@@ -406,8 +406,8 @@ const styles = {
     marginBottom: 10,
   },
   chip: {
-    borderRadius: 7,
-    padding: '4px 9px',
+    borderRadius: 8,
+    padding: '4px 10px',
     fontSize: 11,
     fontWeight: 700,
     background: 'rgba(255,255,255,0.07)',
@@ -417,19 +417,32 @@ const styles = {
   chipAccent: {
     background: 'rgba(233,69,96,0.17)',
     color: '#ff8fa3',
+    border: '1px solid rgba(233,69,96,0.25)',
   },
   chipTV: {
     background: 'rgba(94,166,255,0.17)',
     color: '#7db8ff',
+    border: '1px solid rgba(94,166,255,0.22)',
   },
   chipMuted: {
     background: 'rgba(94,166,255,0.13)',
     color: '#90c4ff',
   },
+  // Genre chips — purple accent
+  chipGenre: {
+    background: 'rgba(142,96,255,0.15)',
+    color: '#c4a8ff',
+    border: '1px solid rgba(142,96,255,0.3)',
+    borderRadius: 8,
+    padding: '4px 10px',
+    fontSize: 11,
+    fontWeight: 700,
+    letterSpacing: '0.02em',
+  },
   serviceFilterButton: {
     borderRadius: 20,
-    border: '1px solid rgba(255,255,255,0.08)',
-    background: 'rgba(255,255,255,0.04)',
+    border: '1px solid rgba(255,255,255,0.10)',
+    background: 'rgba(255,255,255,0.05)',
     color: '#b0bac8',
     padding: '9px 14px',
     display: 'inline-flex',
@@ -446,6 +459,11 @@ const styles = {
     background: 'rgba(233,69,96,0.17)',
     border: '1px solid rgba(233,69,96,0.4)',
     color: '#ff8fa3',
+  },
+  genreFilterButtonActive: {
+    background: 'rgba(142,96,255,0.2)',
+    border: '1px solid rgba(142,96,255,0.45)',
+    color: '#c4a8ff',
   },
   serviceLogoTiny: {
     width: 18,
@@ -483,7 +501,7 @@ const styles = {
     display: 'inline-flex',
     alignItems: 'center',
     gap: 8,
-    border: '1px solid rgba(255,255,255,0.07)',
+    border: '1px solid rgba(255,255,255,0.09)',
     flexShrink: 0,
     whiteSpace: 'nowrap',
   },
@@ -520,13 +538,13 @@ const styles = {
     display: 'inline-flex',
     alignItems: 'center',
     gap: 6,
-    padding: '5px 9px',
+    padding: '5px 10px',
     borderRadius: 999,
-    background: 'rgba(255,255,255,0.05)',
-    border: '1px solid rgba(255,255,255,0.06)',
-    color: '#b0bac8',
+    background: 'rgba(255,255,255,0.06)',
+    border: '1px solid rgba(255,255,255,0.10)',
+    color: '#c8d0e0',
     fontSize: 11,
-    fontWeight: 700,
+    fontWeight: 600,
   },
   providerLogo: {
     width: 16,
@@ -647,6 +665,7 @@ function App() {
   const [isBypassMode, setIsBypassMode] = useState(false);
   const [serviceFilters, setServiceFilters] = useState([]);
   const [languageFilters, setLanguageFilters] = useState([]);
+  const [genreFilters, setGenreFilters] = useState([]);
   const [catalogPage, setCatalogPage] = useState(1);
   const abortRef = useRef(null);
 
@@ -781,6 +800,10 @@ function App() {
         query.set('languageFilters', languageFilters.join(','));
       }
 
+      if (genreFilters.length) {
+        query.set('genreFilters', genreFilters.join(','));
+      }
+
       const response = await apiFetch(`/movies?${query.toString()}`, {
         signal: controller.signal,
         headers: { 'Content-Type': 'application/json' },
@@ -810,7 +833,7 @@ function App() {
     } finally {
       setLoadingMovies(false);
     }
-  }, [isBypassMode, mediaTypeFilter, sortBy, catalogPage, serviceFilters, languageFilters, token]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [isBypassMode, mediaTypeFilter, sortBy, catalogPage, serviceFilters, languageFilters, genreFilters, token]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const formatMediaType = (value) => {
     if (value === 'documentary') {
@@ -858,6 +881,33 @@ function App() {
         : [...current, languageKey]
     );
   };
+
+  const toggleGenreFilter = (genreKey) => {
+    setCatalogPage(1);
+    setGenreFilters((current) =>
+      current.includes(genreKey)
+        ? current.filter((value) => value !== genreKey)
+        : [...current, genreKey]
+    );
+  };
+
+  const ALL_GENRES = [
+    { key: 'Action', label: 'Action' },
+    { key: 'Adventure', label: 'Adventure' },
+    { key: 'Animation', label: 'Animation' },
+    { key: 'anime', label: '✦ Anime' },
+    { key: 'Comedy', label: 'Comedy' },
+    { key: 'Crime', label: 'Crime' },
+    { key: 'Documentary', label: 'Documentary' },
+    { key: 'Drama', label: 'Drama' },
+    { key: 'Fantasy', label: 'Fantasy' },
+    { key: 'Horror', label: 'Horror' },
+    { key: 'Mystery', label: 'Mystery' },
+    { key: 'Romance', label: 'Romance' },
+    { key: 'Science Fiction', label: 'Sci-Fi' },
+    { key: 'Thriller', label: 'Thriller' },
+    { key: 'Western', label: 'Western' },
+  ];
 
   const totalPages = useMemo(() => Math.max(catalogMeta?.totalPages || 1, 1), [catalogMeta]);
   const pageNumbers = useMemo(
@@ -1455,6 +1505,45 @@ function App() {
                   </div>
                 </div>
               </details>
+
+              <details style={styles.dropdownPanel}>
+                <summary style={styles.dropdownSummary}>
+                  <span>Genre Filter</span>
+                  <span style={{ ...styles.dropdownMeta, ...(genreFilters.length ? { color: '#c4a8ff' } : {}) }}>
+                    {genreFilters.length ? `${genreFilters.length} selected` : 'All'}
+                  </span>
+                </summary>
+                <div style={styles.dropdownBody}>
+                  <div style={styles.serviceFilterRow}>
+                    {ALL_GENRES.map((genre) => {
+                      const isActive = genreFilters.includes(genre.key);
+                      return (
+                        <button
+                          key={genre.key}
+                          type="button"
+                          onClick={() => toggleGenreFilter(genre.key)}
+                          className="btn-tap"
+                          style={{
+                            ...styles.serviceFilterButton,
+                            ...(isActive ? styles.genreFilterButtonActive : {}),
+                          }}
+                        >
+                          <span>{genre.label}</span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                  {genreFilters.length > 0 && (
+                    <button
+                      type="button"
+                      onClick={() => { setGenreFilters([]); setCatalogPage(1); }}
+                      style={{ background: 'none', border: 'none', color: '#e94560', fontSize: 12, cursor: 'pointer', marginTop: 8, fontFamily: 'inherit' }}
+                    >
+                      Clear genres
+                    </button>
+                  )}
+                </div>
+              </details>
             </div>
 
             {catalogMeta ? (
@@ -1500,7 +1589,7 @@ function App() {
                         {movie.genres?.length ? (
                           <div style={styles.providerRow}>
                             {movie.genres.slice(0, 4).map((genre) => (
-                              <span key={genre} style={styles.chip}>{genre}</span>
+                              <span key={genre} style={styles.chipGenre}>{genre}</span>
                             ))}
                           </div>
                         ) : null}

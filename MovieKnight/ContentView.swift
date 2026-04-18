@@ -368,11 +368,21 @@ struct CatalogView: View {
     @State private var meta: CatalogMeta?
     @State private var isLoading = false
     @State private var errorMsg: String?
-    @State private var mediaType  = "tv"
-    @State private var sortBy     = "popularity"
-    @State private var page       = 1
-    @State private var totalPages = 1
+    @State private var mediaType    = "tv"
+    @State private var sortBy       = "popularity"
+    @State private var page         = 1
+    @State private var totalPages   = 1
     @State private var showSettings = false
+    @State private var showGenrePicker = false
+    @State private var genreFilters: Set<String> = []
+
+    static let allGenres: [(key: String, label: String)] = [
+        ("Action","Action"), ("Adventure","Adventure"), ("Animation","Animation"),
+        ("anime","Anime ✦"), ("Comedy","Comedy"), ("Crime","Crime"),
+        ("Documentary","Documentary"), ("Drama","Drama"), ("Fantasy","Fantasy"),
+        ("Horror","Horror"), ("Mystery","Mystery"), ("Romance","Romance"),
+        ("Science Fiction","Sci-Fi"), ("Thriller","Thriller"), ("Western","Western")
+    ]
 
     var body: some View {
         VStack(spacing: 0) {
@@ -407,13 +417,16 @@ struct CatalogView: View {
         .sheet(isPresented: $showSettings) {
             PlatformsView().environmentObject(app)
         }
+        .sheet(isPresented: $showGenrePicker) {
+            GenrePickerSheet(selected: $genreFilters) {
+                page = 1; Task { await fetch() }
+            }
+        }
         .task {
-            // Load platforms from backend if not cached, then fetch catalog
             if app.selectedPlatforms.isEmpty { await loadPlatforms() }
             await fetch()
         }
         .onChange(of: showSettings) { open in
-            // Refresh catalog when returning from settings sheet
             if !open { Task { await fetch() } }
         }
     }
@@ -444,22 +457,35 @@ struct CatalogView: View {
                         Button(l) { mediaType = k; page = 1; Task { await fetch() } }
                     }
                 } label: {
-                    FilterChip(label: mediaTypeLabel, icon: "tv", active: true)
+                    FilterChip(label: mediaTypeLabel, icon: "tv", active: mediaType != "tv")
                 }
                 Menu {
                     ForEach([("popularity","Popularity"),("tmdb","TMDb"),("imdb","IMDb"),("rotten_tomatoes","Rotten Tomatoes"),("metacritic","Metacritic"),("release_date","Release Date"),("title","A–Z")], id: \.0) { k, l in
                         Button(l) { sortBy = k; page = 1; Task { await fetch() } }
                     }
                 } label: {
-                    FilterChip(label: sortLabel, icon: "arrow.up.arrow.down", active: false)
+                    FilterChip(label: sortLabel, icon: "arrow.up.arrow.down", active: sortBy != "popularity")
                 }
+                // Genre multi-select
+                Button { showGenrePicker = true } label: {
+                    FilterChip(
+                        label: genreFilters.isEmpty ? "Genres" : "\(genreFilters.count) Genre\(genreFilters.count == 1 ? "" : "s")",
+                        icon: "theatermasks",
+                        active: !genreFilters.isEmpty
+                    )
+                }
+                // Services badge
                 if !app.selectedPlatforms.isEmpty {
-                    Label("\(app.selectedPlatforms.count) services", systemImage: "play.rectangle.on.rectangle")
-                        .font(.system(size: 12))
-                        .foregroundColor(.mkMuted)
-                        .padding(.horizontal, 10).padding(.vertical, 7)
-                        .background(Color.mkSurface)
-                        .clipShape(Capsule())
+                    HStack(spacing: 5) {
+                        Image(systemName: "play.rectangle.on.rectangle").font(.system(size: 10))
+                        Text("\(app.selectedPlatforms.count) services")
+                            .font(.system(size: 12))
+                    }
+                    .foregroundColor(.mkMuted)
+                    .padding(.horizontal, 10).padding(.vertical, 7)
+                    .background(Color.mkSurface)
+                    .clipShape(Capsule())
+                    .overlay(Capsule().stroke(Color.mkBorder, lineWidth: 1))
                 }
             }
             .padding(.horizontal, 16)
@@ -549,7 +575,6 @@ struct CatalogView: View {
 
     @MainActor func fetch() async {
         isLoading = true; errorMsg = nil
-        // Use correct backend query param names
         var params: [String: String] = [
             "page":      String(page),
             "sortBy":    sortBy,
@@ -558,11 +583,13 @@ struct CatalogView: View {
         if !app.selectedPlatforms.isEmpty {
             params["serviceFilters"] = app.selectedPlatforms.joined(separator: ",")
         }
+        if !genreFilters.isEmpty {
+            params["genreFilters"] = genreFilters.joined(separator: ",")
+        }
         do {
             let resp: CatalogResponse = try await APIService.shared.get("/movies", params: params, token: app.token)
             movies = resp.catalog
             meta   = resp.meta
-            // Use totalPages directly from backend meta
             totalPages = resp.meta?.totalPages ?? max(1, Int(ceil(Double(resp.meta?.resultCount ?? 0) / 24.0)))
         } catch APIError.unauthorized {
             app.logout()
@@ -739,43 +766,51 @@ struct TypeChip: View {
     var body: some View {
         Text(label)
             .font(.system(size: 9, weight: .bold))
-            .padding(.horizontal, 7).padding(.vertical, 3)
-            .background(isTV ? Color.mkTV.opacity(0.17) : Color.mkAccent.opacity(0.17))
+            .kerning(0.3)
+            .padding(.horizontal, 8).padding(.vertical, 3)
+            .background(isTV ? Color.mkTV.opacity(0.18) : Color.mkAccent.opacity(0.18))
             .foregroundColor(isTV ? .mkTV : .mkAccent)
             .clipShape(Capsule())
     }
 }
 
+// Genre chips — distinct purple tint so they stand out from provider chips
 struct PillChip: View {
     let text: String; let color: Color
+    static let genreTint = Color(red: 0.56, green: 0.38, blue: 1.0)
     var body: some View {
         Text(text)
-            .font(.system(size: 10))
-            .padding(.horizontal, 7).padding(.vertical, 3)
-            .background(Color.mkSurface)
-            .foregroundColor(color)
+            .font(.system(size: 10, weight: .semibold))
+            .kerning(0.2)
+            .padding(.horizontal, 8).padding(.vertical, 3)
+            .background(Self.genreTint.opacity(0.13))
+            .foregroundColor(Self.genreTint)
             .clipShape(Capsule())
+            .overlay(Capsule().stroke(Self.genreTint.opacity(0.25), lineWidth: 1))
     }
 }
 
+// Streaming provider chips — logo + name with subtle glow
 struct ProviderChip: View {
     let name: String
     var platform: StreamingPlatform? {
         allPlatforms.first { name.lowercased().contains($0.key) || $0.name.lowercased() == name.lowercased() }
     }
     var body: some View {
-        HStack(spacing: 3) {
+        HStack(spacing: 4) {
             if let p = platform {
                 Image(p.logoAsset).resizable().scaledToFit()
-                    .frame(width: 12, height: 12)
-                    .clipShape(RoundedRectangle(cornerRadius: 2))
+                    .frame(width: 14, height: 14)
+                    .clipShape(RoundedRectangle(cornerRadius: 3))
             }
-            Text(name.count > 12 ? String(name.prefix(10)) + "…" : name)
-                .font(.system(size: 9)).foregroundColor(.mkMuted)
+            Text(name.count > 11 ? String(name.prefix(9)) + "…" : name)
+                .font(.system(size: 10, weight: .medium))
+                .foregroundColor(.mkText.opacity(0.75))
         }
-        .padding(.horizontal, 6).padding(.vertical, 2)
-        .background(Color.mkBackground)
+        .padding(.horizontal, 8).padding(.vertical, 4)
+        .background(Color.mkSurface)
         .clipShape(Capsule())
+        .overlay(Capsule().stroke(Color.mkBorder, lineWidth: 1))
     }
 }
 
@@ -797,6 +832,96 @@ struct RatingChip: View {
         .background(Color.mkBackground)
         .clipShape(RoundedRectangle(cornerRadius: 8))
         .overlay(RoundedRectangle(cornerRadius: 8).stroke(entry.color.opacity(0.3), lineWidth: 1))
+    }
+}
+
+// MARK: - Genre Picker Sheet
+
+struct GenrePickerSheet: View {
+    @Binding var selected: Set<String>
+    @Environment(\.dismiss) private var dismiss
+    let onApply: () -> Void
+
+    private let columns = Array(repeating: GridItem(.flexible(), spacing: 10), count: 3)
+
+    var body: some View {
+        NavigationView {
+            ZStack {
+                Color.mkBackground.ignoresSafeArea()
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 20) {
+                        Text("Select one or more genres. Results matching any selected genre will be shown.")
+                            .font(.subheadline)
+                            .foregroundColor(.mkMuted)
+                            .padding(.horizontal, 20)
+                            .padding(.top, 4)
+
+                        LazyVGrid(columns: columns, spacing: 10) {
+                            ForEach(CatalogView.allGenres, id: \.key) { genre in
+                                let isOn = selected.contains(genre.key)
+                                Button {
+                                    withAnimation(.spring(duration: 0.2)) {
+                                        if isOn { selected.remove(genre.key) }
+                                        else     { selected.insert(genre.key) }
+                                    }
+                                } label: {
+                                    Text(genre.label)
+                                        .font(.system(size: 13, weight: .semibold))
+                                        .multilineTextAlignment(.center)
+                                        .lineLimit(2)
+                                        .minimumScaleFactor(0.8)
+                                        .frame(maxWidth: .infinity, minHeight: 48)
+                                        .foregroundColor(isOn ? .white : .mkMuted)
+                                        .background(
+                                            RoundedRectangle(cornerRadius: 12)
+                                                .fill(isOn
+                                                    ? Color(red: 0.56, green: 0.38, blue: 1.0).opacity(0.28)
+                                                    : Color.mkSurface)
+                                        )
+                                        .overlay(
+                                            RoundedRectangle(cornerRadius: 12)
+                                                .stroke(isOn
+                                                    ? Color(red: 0.56, green: 0.38, blue: 1.0).opacity(0.6)
+                                                    : Color.mkBorder, lineWidth: 1)
+                                        )
+                                }
+                                .buttonStyle(ScaleButtonStyle())
+                            }
+                        }
+                        .padding(.horizontal, 16)
+
+                        if !selected.isEmpty {
+                            Button(role: .destructive) {
+                                selected.removeAll()
+                            } label: {
+                                Label("Clear All Genres", systemImage: "xmark.circle")
+                                    .font(.subheadline)
+                                    .foregroundColor(.mkAccent)
+                            }
+                            .frame(maxWidth: .infinity)
+                            .padding(.top, 4)
+                        }
+                    }
+                    .padding(.bottom, 24)
+                }
+            }
+            .navigationTitle("Filter by Genre")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .navigationBarLeading) {
+                    Button("Cancel") { dismiss() }
+                        .foregroundColor(.mkMuted)
+                }
+                ToolbarItem(placement: .navigationBarTrailing) {
+                    Button("Apply") {
+                        onApply()
+                        dismiss()
+                    }
+                    .fontWeight(.semibold)
+                    .foregroundColor(.mkAccent)
+                }
+            }
+        }
     }
 }
 
