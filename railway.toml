@@ -1,11 +1,8 @@
 [build]
 builder = "nixpacks"
+buildCommand = "cd backend && npm install"
 
 [deploy]
-startCommand = "node index.js"
+startCommand = "node backend/index.js"
 restartPolicyType = "on_failure"
 restartPolicyMaxRetries = 3
-
-[[services]]
-name = "streamscore-backend"
-rootDirectory = "backend"
