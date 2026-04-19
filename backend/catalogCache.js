@@ -1,4 +1,4 @@
-const { fetchCatalogByPlatforms, fetchOmdbRatings, fetchTitleDetails } = require('./movieService');
+const { fetchCatalogByPlatforms, fetchOmdbRatings, fetchTitleDetails, isOmdbRateLimited } = require('./movieService');
 
 const CATALOG_SYNC_HOURS = Math.max(Number(process.env.CATALOG_SYNC_HOURS) || 24, 1);
 const DAILY_SYNC_MS = CATALOG_SYNC_HOURS * 60 * 60 * 1000;
@@ -73,7 +73,7 @@ async function mapWithConcurrency(items, concurrency, mapper) {
 }
 
 function isRateLimitError(error) {
-  return /too many requests|rate limit/i.test(String(error?.message || error));
+  return /too many requests|rate limit|request limit/i.test(String(error?.message || error));
 }
 
 function buildScopeKey(platforms, region = DEFAULT_REGION) {
@@ -141,17 +141,6 @@ async function syncScope(db, { platforms, languages, region = DEFAULT_REGION }) 
   }
 
   const syncPromise = (async () => {
-    // On a cold start (no cached entries yet for this scope), fetch OMDB ratings inline
-    // so they're available the moment the catalog is first written — no separate hydration lag.
-    // On subsequent re-syncs the UPSERT preserves existing ratings, so includeRatings: false
-    // avoids burning OMDB quota every 24 h.
-    const existingRow = await get(
-      db,
-      'SELECT COUNT(*) AS count FROM catalog_cache_entries WHERE scope_key = ?',
-      [scopeKey]
-    );
-    const isColdStart = (existingRow?.count || 0) === 0;
-
     const catalog = await fetchCatalogByPlatforms(platforms, {
       mediaType: 'all',
       sortBy: 'popularity',
@@ -159,7 +148,7 @@ async function syncScope(db, { platforms, languages, region = DEFAULT_REGION }) 
       page: 1,
       pageCount: 6,
       region,
-      includeRatings: isColdStart,
+      includeRatings: false,   // always skip inline OMDB — background hydration handles ratings
       includeExternalIds: true,
       snapshotMode: true,
     });
@@ -308,6 +297,12 @@ async function hydrateScopeRatings(db, scopeKey) {
     const MAX_CONSECUTIVE_ERRORS = 5;
 
     while (true) {
+      // Exit early if OMDB circuit breaker is tripped — hydration resumes after midnight reset
+      if (isOmdbRateLimited()) {
+        console.warn(`Rating hydration paused for ${scopeKey}: OMDB daily limit reached.`);
+        return;
+      }
+
       const rows = await all(
         db,
         `SELECT scope_key, media_type, tmdb_id, imdb_id

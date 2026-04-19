@@ -13,6 +13,23 @@ const PREFETCH_DISCOVER_PAGES = 5;
 const SNAPSHOT_DISCOVER_PAGES = 6;
 const MAX_SNAPSHOT_ITEMS = 300;
 
+// OMDB circuit breaker — trips when the daily request limit is hit.
+// Resets automatically at next midnight so hydration resumes the following day.
+let omdbRateLimited = false;
+function tripOmdbRateLimit() {
+  if (omdbRateLimited) return;
+  omdbRateLimited = true;
+  console.warn('OMDB daily limit reached — pausing all OMDB requests until midnight.');
+  const now = new Date();
+  const midnight = new Date(now);
+  midnight.setHours(24, 0, 0, 0);
+  setTimeout(() => {
+    omdbRateLimited = false;
+    console.info('OMDB circuit breaker reset — requests will resume.');
+  }, midnight.getTime() - now.getTime()).unref();
+}
+function isOmdbRateLimited() { return omdbRateLimited; }
+
 const PLATFORM_CONFIG = {
   netflix: { id: 8, name: 'Netflix' },
   hulu: { id: 15, name: 'Hulu' },
@@ -163,6 +180,11 @@ async function fetchOmdbRatings(imdbId) {
     return buildRatingsPayload({});
   }
 
+  // Circuit breaker — don't waste requests when daily limit is known to be hit
+  if (isOmdbRateLimited()) {
+    return null;
+  }
+
   const cacheKey = imdbId;
   const cached = getCacheEntry(omdbCache, cacheKey);
   if (cached) {
@@ -175,12 +197,18 @@ async function fetchOmdbRatings(imdbId) {
 
   try {
     const data = await fetchJson(url.toString());
+    // OMDB returns 200 with Response:"False" and Error when limit is hit
+    if (data.Response === 'False' && /request limit/i.test(data.Error || '')) {
+      tripOmdbRateLimit();
+      return null;
+    }
     const ratings = buildRatingsPayload(data);
     setCacheEntry(omdbCache, cacheKey, ratings);
     return ratings;
   } catch (error) {
-    // On network / rate-limit errors, return null so the caller skips this update.
-    // This keeps rating_imdb as NULL (not '') so the item stays in the hydration queue.
+    if (/request limit/i.test(error.message)) {
+      tripOmdbRateLimit();
+    }
     console.warn(`OMDB fetch failed for ${imdbId}: ${error.message}`);
     return null;
   }
@@ -486,6 +514,7 @@ module.exports = {
   fetchOmdbRatings,
   fetchCatalogByPlatforms,
   fetchTitleDetails,
+  isOmdbRateLimited,
   // Exported for unit testing
   buildRatingsPayload,
   toSortableRating,
