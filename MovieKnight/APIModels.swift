@@ -3,11 +3,7 @@ import Foundation
 // MARK: - API Config
 
 struct API {
-    #if targetEnvironment(simulator)
-    static let baseURL = "http://localhost:4000"
-    #else
     static let baseURL = "https://streamscore-backend-production.up.railway.app"
-    #endif
     static let appName = "StreamScore"
 }
 

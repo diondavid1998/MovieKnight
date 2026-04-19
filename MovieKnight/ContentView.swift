@@ -368,7 +368,7 @@ struct CatalogView: View {
     @State private var meta: CatalogMeta?
     @State private var isLoading = false
     @State private var errorMsg: String?
-    @State private var mediaType    = "tv"
+    @State private var mediaType    = "all"
     @State private var sortBy       = "popularity"
     @State private var page         = 1
     @State private var totalPages   = 1
@@ -401,7 +401,31 @@ struct CatalogView: View {
                 }
                 Spacer()
             } else if movies.isEmpty && !isLoading {
-                emptyState
+                if let err = errorMsg {
+                    Spacer()
+                    VStack(spacing: 12) {
+                        Image(systemName: "wifi.exclamationmark")
+                            .font(.system(size: 40))
+                            .foregroundColor(.mkAccent)
+                        Text("Couldn't load titles")
+                            .font(.title3).bold()
+                            .foregroundColor(.mkMuted)
+                        Text(err)
+                            .font(.subheadline)
+                            .foregroundColor(.mkMuted.opacity(0.7))
+                            .multilineTextAlignment(.center)
+                            .padding(.horizontal, 40)
+                        MKButton(label: "Retry", icon: "arrow.clockwise") {
+                            Task { await fetch() }
+                        }
+                        .frame(maxWidth: 180)
+                        .padding(.top, 4)
+                    }
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    Spacer()
+                } else {
+                    emptyState
+                }
             } else {
                 ScrollView {
                     LazyVStack(spacing: 12) {
@@ -425,6 +449,11 @@ struct CatalogView: View {
         }
         .task {
             if app.selectedPlatforms.isEmpty { await loadPlatforms() }
+            // If still no platforms after syncing with server, send user to setup
+            if app.selectedPlatforms.isEmpty {
+                showSettings = true
+                return
+            }
             await fetch()
             startPollingIfNeeded()
         }
@@ -460,7 +489,7 @@ struct CatalogView: View {
                         Button(l) { mediaType = k; page = 1; Task { await fetch() } }
                     }
                 } label: {
-                    FilterChip(label: mediaTypeLabel, icon: "tv", active: mediaType != "tv")
+                    FilterChip(label: mediaTypeLabel, icon: "tv", active: mediaType != "all")
                 }
                 Menu {
                     ForEach([("popularity","Popularity"),("tmdb","TMDb"),("imdb","IMDb"),("rotten_tomatoes","Rotten Tomatoes"),("metacritic","Metacritic"),("release_date","Release Date"),("title","A–Z")], id: \.0) { k, l in
@@ -498,11 +527,20 @@ struct CatalogView: View {
     var emptyState: some View {
         Spacer()
         return VStack(spacing: 14) {
-            Image(systemName: "popcorn").font(.system(size: 44)).foregroundColor(.mkMuted)
-            Text("No titles found").font(.title3).bold().foregroundColor(.mkMuted)
-            Text("Adjust your filters or add streaming services.").font(.subheadline).foregroundColor(.mkMuted.opacity(0.7)).multilineTextAlignment(.center).padding(.horizontal, 40)
-            MKButton(label: "Edit Services", icon: "gearshape.fill") { showSettings = true }
-                .frame(maxWidth: 220).padding(.top, 4)
+            if app.selectedPlatforms.isEmpty {
+                Image(systemName: "play.rectangle.on.rectangle").font(.system(size: 44)).foregroundColor(.mkMuted)
+                Text("No services selected").font(.title3).bold().foregroundColor(.mkMuted)
+                Text("Add your streaming services to see what's available to watch.")
+                    .font(.subheadline).foregroundColor(.mkMuted.opacity(0.7)).multilineTextAlignment(.center).padding(.horizontal, 40)
+                MKButton(label: "Add Services", icon: "plus.circle.fill") { showSettings = true }
+                    .frame(maxWidth: 220).padding(.top, 4)
+            } else {
+                Image(systemName: "popcorn").font(.system(size: 44)).foregroundColor(.mkMuted)
+                Text("No titles found").font(.title3).bold().foregroundColor(.mkMuted)
+                Text("Adjust your filters or add streaming services.").font(.subheadline).foregroundColor(.mkMuted.opacity(0.7)).multilineTextAlignment(.center).padding(.horizontal, 40)
+                MKButton(label: "Edit Services", icon: "gearshape.fill") { showSettings = true }
+                    .frame(maxWidth: 220).padding(.top, 4)
+            }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
@@ -580,8 +618,8 @@ struct CatalogView: View {
         isLoading = true; errorMsg = nil
         var params: [String: String] = [
             "page":      String(page),
-            "sortBy":    sortBy,
-            "mediaType": mediaType
+            "sortBy":    sortBy.isEmpty ? "popularity" : sortBy,
+            "mediaType": mediaType.isEmpty ? "all" : mediaType
         ]
         if !app.selectedPlatforms.isEmpty {
             params["serviceFilters"] = app.selectedPlatforms.joined(separator: ",")
@@ -594,6 +632,10 @@ struct CatalogView: View {
             movies = resp.catalog
             meta   = resp.meta
             totalPages = resp.meta?.totalPages ?? max(1, Int(ceil(Double(resp.meta?.resultCount ?? 0) / 24.0)))
+            // If catalog is syncing for first time, start polling until it populates
+            if movies.isEmpty && meta?.refreshing == true {
+                startPollingIfNeeded()
+            }
         } catch APIError.unauthorized {
             app.logout()
         } catch {

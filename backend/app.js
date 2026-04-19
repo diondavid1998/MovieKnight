@@ -21,6 +21,10 @@ const JWT_SECRET = process.env.JWT_SECRET || 'test-secret-key';
 function createApp(db, { disableRateLimit = false } = {}) {
   const app = express();
 
+  // Railway (and most PaaS) sit behind a reverse proxy that sets X-Forwarded-For.
+  // Without this, express-rate-limit throws ERR_ERL_UNEXPECTED_X_FORWARDED_FOR.
+  app.set('trust proxy', 1);
+
   // Support comma-separated list so both Netlify and localhost can be allowed at once
   // e.g. FRONTEND_URL="https://screenscoretest.netlify.app,http://localhost:3000"
   // Trailing slashes are stripped so accidental misconfiguration on Render/Railway still works

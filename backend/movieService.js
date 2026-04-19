@@ -271,6 +271,8 @@ function normalizeProviders(details, providerMapById, region = DEFAULT_REGION) {
 function normalizeCatalogItem(rawItem, details, ratings, providers, mediaType) {
   const title = rawItem.title || rawItem.name || details.title || details.name || 'Untitled';
   const releaseDate = rawItem.release_date || rawItem.first_air_date || details.release_date || details.first_air_date || null;
+  // ratings may be null when OMDB is rate-limited or unavailable — treat as empty
+  const r = ratings ?? {};
 
   return {
     id: `${mediaType}-${rawItem.id}`,
@@ -288,19 +290,19 @@ function normalizeCatalogItem(rawItem, details, ratings, providers, mediaType) {
     popularity: rawItem.popularity || details.popularity || null,
     originalLanguage: rawItem.original_language || details.original_language || null,
     genres: Array.isArray(details.genres) ? details.genres.map((genre) => genre.name) : [],
-    imdbId: details.external_ids?.imdb_id || ratings.imdbId || null,
+    imdbId: details.external_ids?.imdb_id || r.imdbId || null,
     ratings: {
       tmdb: rawItem.vote_average || details.vote_average || null,
-      imdb: ratings.imdb,
-      rottenTomatoes: ratings.rottenTomatoes,
-      metacritic: ratings.metacritic,
+      imdb: r.imdb ?? null,
+      rottenTomatoes: r.rottenTomatoes ?? null,
+      metacritic: r.metacritic ?? null,
       letterboxd: null,
     },
     sortableRatings: {
       tmdb: rawItem.vote_average || details.vote_average || 0,
-      imdb: toSortableRating(ratings.imdb),
-      rottenTomatoes: toSortableRating(ratings.rottenTomatoes),
-      metacritic: toSortableRating(ratings.metacritic),
+      imdb: toSortableRating(r.imdb),
+      rottenTomatoes: toSortableRating(r.rottenTomatoes),
+      metacritic: toSortableRating(r.metacritic),
       letterboxd: null,
     },
     availableOn: providers.names,
