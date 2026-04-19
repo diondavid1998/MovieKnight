@@ -4,22 +4,23 @@ A full-stack streaming catalog app that lets you pick your streaming services an
 
 ---
 
-## 🚀 One-Click Deploy (Free Hosting)
+## 🚀 Deploy
 
-Deploy the backend to Render and the frontend to Netlify — both are free tiers, no credit card required.
+Backend runs on **Railway** (no sleep, persistent disk). Frontend is hosted on **Netlify**.
 
-### Step 1 — Deploy the backend on Render
+### Step 1 — Deploy the backend on Railway
 
-[![Deploy to Render](https://render.com/images/deploy-to-render-button.svg)](https://render.com/deploy?repo=https://github.com/diondavid1998/MovieKnight)
-
-1. Click the button above and sign in / create a free [Render](https://render.com) account.
-2. Render will detect `render.yaml` and pre-fill the service settings.
-3. Fill in the required environment variables when prompted:
-   - `TMDB_API_KEY` → get a free key at [themoviedb.org/settings/api](https://www.themoviedb.org/settings/api)
-   - `OMDB_API_KEY` → get a free key at [omdbapi.com/apikey.aspx](https://www.omdbapi.com/apikey.aspx)
-   - `FRONTEND_URL` → leave blank for now; update it after Step 2
-   - `JWT_SECRET` → auto-generated for you ✅
-4. Click **Apply** — Render builds and starts the backend. Copy the URL it gives you (e.g. `https://streamscore-backend.onrender.com`).
+1. Go to [railway.app](https://railway.app) → **New Project** → **Deploy from GitHub repo** → select this repo
+2. Set **Root Directory** to `backend` in the service settings
+3. Add a **Volume** (Storage tab) mounted at `/data`
+4. Set these environment variables:
+   - `TMDB_API_KEY` → free key at [themoviedb.org/settings/api](https://www.themoviedb.org/settings/api)
+   - `OMDB_API_KEY` → free key at [omdbapi.com/apikey.aspx](https://www.omdbapi.com/apikey.aspx)
+   - `JWT_SECRET` → any long random string
+   - `DB_PATH` → `/data/db.sqlite`
+   - `NODE_ENV` → `production`
+   - `FRONTEND_URL` → leave blank for now; update after Step 2
+5. Railway will deploy automatically. Copy your Railway URL (e.g. `https://your-app.up.railway.app`).
 
 ### Step 2 — Deploy the frontend on Netlify
 
@@ -28,17 +29,17 @@ Deploy the backend to Render and the frontend to Netlify — both are free tiers
 1. Click the button above and sign in / create a free [Netlify](https://netlify.com) account.
 2. Netlify will detect `netlify.toml` and use `web-frontend/` as the build root automatically.
 3. After the deploy finishes, go to **Site configuration → Environment variables** and add:
-   - Key: `REACT_APP_API_BASE` → Value: the Render backend URL from Step 1 (e.g. `https://streamscore-backend.onrender.com`)
+   - Key: `REACT_APP_API_BASE` → Value: your Railway URL from Step 1
 4. Go to **Deploys → Trigger deploy → Deploy site** to rebuild with the new variable.
-5. Copy your Netlify site URL (e.g. `https://streamscore-xyz.netlify.app`).
+5. Copy your Netlify site URL (e.g. `https://your-site.netlify.app`).
 
 ### Step 3 — Connect frontend ↔ backend
 
-1. Back on the Render dashboard, open the `streamscore-backend` service → **Environment**.
-2. Set `FRONTEND_URL` to your Netlify URL from Step 2 (e.g. `https://streamscore-xyz.netlify.app`).
-3. Render will redeploy automatically.
+1. Back on the Railway dashboard, open your service → **Variables**
+2. Set `FRONTEND_URL` to your Netlify URL from Step 2
+3. Railway will redeploy automatically.
 
-> ✅ Both services are now live and talking to each other. Use your Netlify URL to open the app in Safari and install it as a PWA (see section below).
+> ✅ Both services are now live and talking to each other.
 
 ---
 
