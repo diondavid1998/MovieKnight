@@ -3,6 +3,8 @@ const { fetchCatalogByPlatforms, fetchOmdbRatings, fetchTitleDetails, isOmdbRate
 const CATALOG_SYNC_HOURS = Math.max(Number(process.env.CATALOG_SYNC_HOURS) || 24, 1);
 const DAILY_SYNC_MS = CATALOG_SYNC_HOURS * 60 * 60 * 1000;
 const DEFAULT_REGION = 'US';
+// Ratings rarely change — cache them for 30 days before re-fetching from OMDB
+const RATINGS_CACHE_TTL_DAYS = Number(process.env.RATINGS_CACHE_TTL_DAYS) || 30;
 const syncLocks = new Map();
 const ratingHydrationLocks = new Map();
 const identifierBackfillLocks = new Map();
@@ -124,6 +126,23 @@ async function ensureCatalogTables(db) {
       item_count INTEGER DEFAULT 0
     )`
   );
+
+  // Shared cross-scope ratings cache keyed by imdb_id.
+  // Populated after every OMDB fetch so that any title rated once is reused
+  // across all scopes without additional OMDB calls.
+  await run(
+    db,
+    `CREATE TABLE IF NOT EXISTS title_ratings (
+      imdb_id         TEXT PRIMARY KEY,
+      rating_imdb     TEXT,
+      rating_imdb_num REAL,
+      rating_rt       TEXT,
+      rating_rt_num   REAL,
+      rating_meta     TEXT,
+      rating_meta_num REAL,
+      fetched_at      TEXT NOT NULL
+    )`
+  );
 }
 
 function isScopeStale(stateRow) {
@@ -132,6 +151,33 @@ function isScopeStale(stateRow) {
   }
 
   return Date.now() - new Date(stateRow.last_synced_at).getTime() >= DAILY_SYNC_MS;
+}
+
+// Bulk-copy ratings from title_ratings → catalog_cache_entries for a scope.
+// Called after each sync so any title we've already rated (from another scope or
+// a previous session) is immediately populated without OMDB calls.
+async function populateRatingsFromCache(db, scopeKey) {
+  const cutoff = new Date(Date.now() - RATINGS_CACHE_TTL_DAYS * 24 * 60 * 60 * 1000).toISOString();
+  const result = await run(
+    db,
+    `UPDATE catalog_cache_entries AS e
+     SET rating_imdb     = tr.rating_imdb,
+         rating_imdb_num = tr.rating_imdb_num,
+         rating_rt       = tr.rating_rt,
+         rating_rt_num   = tr.rating_rt_num,
+         rating_meta     = tr.rating_meta,
+         rating_meta_num = tr.rating_meta_num
+     FROM title_ratings AS tr
+     WHERE e.scope_key = ?
+       AND e.imdb_id = tr.imdb_id
+       AND tr.fetched_at >= ?
+       AND (e.rating_imdb IS NULL OR e.rating_rt IS NULL OR e.rating_meta IS NULL)`,
+    [scopeKey, cutoff]
+  );
+  const count = result?.changes ?? 0;
+  if (count > 0) {
+    console.info(`Populated ${count} ratings from shared cache for ${scopeKey}`);
+  }
 }
 
 async function syncScope(db, { platforms, languages, region = DEFAULT_REGION }) {
@@ -255,6 +301,12 @@ async function syncScope(db, { platforms, languages, region = DEFAULT_REGION }) 
       }
     });
 
+    // Populate ratings from shared cache first (free, no OMDB calls).
+    // Any remaining NULLs will be filled by background hydration.
+    await populateRatingsFromCache(db, scopeKey).catch((err) => {
+      console.warn(`populateRatingsFromCache failed for ${scopeKey}: ${err.message}`);
+    });
+
     hydrateScopeRatings(db, scopeKey).catch((error) => {
       console.error(`Background rating hydration failed for ${scopeKey}:`, error);
     });
@@ -352,8 +404,17 @@ async function hydrateScopeRatings(db, scopeKey) {
       await enqueueWrite(async () => {
         await run(db, 'BEGIN IMMEDIATE TRANSACTION');
         try {
+          const now = new Date().toISOString();
           for (const update of updates) {
-            // Use '' (not null) for missing ratings so this entry won't re-enter the hydration queue
+            const imdb     = update.ratings.imdb ?? '';
+            const imdbNum  = toSortableRating(update.ratings.imdb);
+            const rt       = update.ratings.rottenTomatoes ?? '';
+            const rtNum    = toSortableRating(update.ratings.rottenTomatoes);
+            const meta     = update.ratings.metacritic ?? '';
+            const metaNum  = toSortableRating(update.ratings.metacritic);
+
+            // Update this scope's entry
+            // Use '' (not null) for missing ratings so the entry won't re-enter the hydration queue
             await run(
               db,
               `UPDATE catalog_cache_entries
@@ -362,19 +423,28 @@ async function hydrateScopeRatings(db, scopeKey) {
                    rating_meta = ?, rating_meta_num = ?,
                    updated_at = ?
                WHERE scope_key = ? AND media_type = ? AND tmdb_id = ?`,
-              [
-                update.ratings.imdb ?? '',
-                toSortableRating(update.ratings.imdb),
-                update.ratings.rottenTomatoes ?? '',
-                toSortableRating(update.ratings.rottenTomatoes),
-                update.ratings.metacritic ?? '',
-                toSortableRating(update.ratings.metacritic),
-                new Date().toISOString(),
-                update.scope_key,
-                update.media_type,
-                update.tmdb_id,
-              ]
+              [imdb, imdbNum, rt, rtNum, meta, metaNum, now,
+               update.scope_key, update.media_type, update.tmdb_id]
             );
+
+            // Write to shared cross-scope ratings cache so other scopes get this for free
+            if (update.imdb_id) {
+              await run(
+                db,
+                `INSERT INTO title_ratings
+                   (imdb_id, rating_imdb, rating_imdb_num, rating_rt, rating_rt_num, rating_meta, rating_meta_num, fetched_at)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                 ON CONFLICT(imdb_id) DO UPDATE SET
+                   rating_imdb     = excluded.rating_imdb,
+                   rating_imdb_num = excluded.rating_imdb_num,
+                   rating_rt       = excluded.rating_rt,
+                   rating_rt_num   = excluded.rating_rt_num,
+                   rating_meta     = excluded.rating_meta,
+                   rating_meta_num = excluded.rating_meta_num,
+                   fetched_at      = excluded.fetched_at`,
+                [update.imdb_id, imdb, imdbNum, rt, rtNum, meta, metaNum, now]
+              );
+            }
           }
           await run(db, 'COMMIT');
         } catch (error) {
