@@ -633,6 +633,12 @@ struct CatalogView: View {
         }
         do {
             let resp: CatalogResponse = try await APIService.shared.get("/movies", params: params, token: app.token)
+            // Surface any server-side error (e.g. DB not ready) instead of silently showing empty
+            if let serverError = resp.error, resp.catalog.isEmpty {
+                errorMsg = serverError
+                isLoading = false
+                return
+            }
             movies = resp.catalog
             meta   = resp.meta
             totalPages = resp.meta?.totalPages ?? max(1, Int(ceil(Double(resp.meta?.resultCount ?? 0) / 24.0)))

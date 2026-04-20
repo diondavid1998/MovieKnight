@@ -147,14 +147,21 @@ function createApp(db, { disableRateLimit = false } = {}) {
 
   // ── Platforms GET ─────────────────────────────────────────────────────────
   app.get('/platforms', authenticateToken, (req, res) => {
-    db.get('SELECT platforms, languages FROM users WHERE id = ?', [req.user.id], (err, row) => {
-      if (err || !row) return res.status(404).json({ error: 'User not found' });
-      let platforms = [];
-      let languages = [];
-      try { platforms = JSON.parse(row.platforms); } catch { platforms = []; }
-      try { languages = JSON.parse(row.languages || '[]'); } catch { languages = []; }
-      res.json({ platforms, languages });
-    });
+    // Auto-recreate user row if DB was wiped (Railway ephemeral filesystem)
+    db.run(
+      'INSERT OR IGNORE INTO users (id, username, password) VALUES (?, ?, ?)',
+      [req.user.id, req.user.username, ''],
+      () => {
+        db.get('SELECT platforms, languages FROM users WHERE id = ?', [req.user.id], (err, row) => {
+          if (err || !row) return res.status(500).json({ error: 'Database error' });
+          let platforms = [];
+          let languages = [];
+          try { platforms = JSON.parse(row.platforms); } catch { platforms = []; }
+          try { languages = JSON.parse(row.languages || '[]'); } catch { languages = []; }
+          res.json({ platforms, languages });
+        });
+      }
+    );
   });
 
   // ── Platforms PUT ─────────────────────────────────────────────────────────
@@ -166,12 +173,15 @@ function createApp(db, { disableRateLimit = false } = {}) {
     if (languages !== undefined && !Array.isArray(languages)) {
       return res.status(400).json({ error: 'Languages must be an array' });
     }
+    // Upsert — works even if the user row was wiped from DB
     db.run(
-      'UPDATE users SET platforms = ?, languages = ? WHERE id = ?',
+      `INSERT INTO users (id, username, password, platforms, languages) VALUES (?, ?, '', ?, ?)
+       ON CONFLICT(id) DO UPDATE SET platforms = excluded.platforms, languages = excluded.languages`,
       [
+        req.user.id,
+        req.user.username,
         JSON.stringify(platforms),
         JSON.stringify(Array.isArray(languages) ? languages : []),
-        req.user.id,
       ],
       function (err) {
         if (err) return res.status(500).json({ error: 'Update failed' });
@@ -182,47 +192,59 @@ function createApp(db, { disableRateLimit = false } = {}) {
 
   // ── Movies (catalog) ─────────────────────────────────────────────────────
   app.get('/movies', authenticateToken, async (req, res) => {
-    db.get(
-      'SELECT platforms, languages FROM users WHERE id = ?',
-      [req.user.id],
-      async (err, row) => {
-        if (err || !row) {
-          return res.status(404).json({ error: 'User not found' });
-        }
+    const serviceFiltersFromQuery = String(req.query.serviceFilters || '')
+      .split(',').map((v) => v.trim()).filter(Boolean);
 
-        let platforms = [];
-        let languages = [];
-        try { platforms = JSON.parse(row.platforms || '[]'); } catch { platforms = []; }
-        try { languages = JSON.parse(row.languages || '[]'); } catch { languages = []; }
+    // Auto-recreate user row if DB was wiped (Railway ephemeral filesystem)
+    db.run(
+      'INSERT OR IGNORE INTO users (id, username, password) VALUES (?, ?, ?)',
+      [req.user.id, req.user.username, ''],
+      () => {
+        db.get(
+          'SELECT platforms, languages FROM users WHERE id = ?',
+          [req.user.id],
+          async (err, row) => {
+            if (err || !row) {
+              return res.status(500).json({ error: 'Database error' });
+            }
 
-        const mediaType = req.query.mediaType || 'all';
-        const sortBy = req.query.sortBy || 'popularity';
-        const limit = req.query.limit || 24;
-        const region = req.query.region || 'US';
-        const page = req.query.page || 1;
-        const serviceFilters = String(req.query.serviceFilters || '')
-          .split(',').map((v) => v.trim()).filter(Boolean);
-        const languageFilters = String(req.query.languageFilters || '')
-          .split(',').map((v) => v.trim()).filter(Boolean);
-        const genreFilters = String(req.query.genreFilters || '')
-          .split(',').map((v) => v.trim()).filter(Boolean);
+            let platforms = [];
+            let languages = [];
+            try { platforms = JSON.parse(row.platforms || '[]'); } catch { platforms = []; }
+            try { languages = JSON.parse(row.languages || '[]'); } catch { languages = []; }
 
-        try {
-          const scopeKey = await ensureScopeSynced(db, { platforms, languages, region });
-          const catalog = await readCachedCatalog(db, {
-            scopeKey,
-            mediaType,
-            sortBy,
-            page: Number(page),
-            pageSize: Number(limit),
-            serviceFilters,
-            languageFilters,
-            genreFilters,
-          });
-          res.json(catalog);
-        } catch (e) {
-          res.status(500).json({ error: 'Failed to load cached catalog', details: e.message });
-        }
+            // If the user has no platforms saved in DB (e.g. after a DB wipe),
+            // fall back to serviceFilters sent by the client so the catalog still builds.
+            const scopePlatforms = platforms.length > 0 ? platforms : serviceFiltersFromQuery;
+
+            const mediaType = req.query.mediaType || 'all';
+            const sortBy = req.query.sortBy || 'popularity';
+            const limit = req.query.limit || 24;
+            const region = req.query.region || 'US';
+            const page = req.query.page || 1;
+            const languageFilters = String(req.query.languageFilters || '')
+              .split(',').map((v) => v.trim()).filter(Boolean);
+            const genreFilters = String(req.query.genreFilters || '')
+              .split(',').map((v) => v.trim()).filter(Boolean);
+
+            try {
+              const scopeKey = await ensureScopeSynced(db, { platforms: scopePlatforms, languages, region });
+              const catalog = await readCachedCatalog(db, {
+                scopeKey,
+                mediaType,
+                sortBy,
+                page: Number(page),
+                pageSize: Number(limit),
+                serviceFilters: serviceFiltersFromQuery,
+                languageFilters,
+                genreFilters,
+              });
+              res.json(catalog);
+            } catch (e) {
+              res.status(500).json({ error: 'Failed to load cached catalog', details: e.message });
+            }
+          }
+        );
       }
     );
   });
