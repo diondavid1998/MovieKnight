@@ -863,7 +863,7 @@ struct PillChip: View {
     }
 }
 
-// Streaming provider chips — logo + name with subtle glow
+// Streaming provider chips — neutral pill, clearly a "service" tag
 struct ProviderChip: View {
     let name: String
     var platform: StreamingPlatform? {
@@ -877,13 +877,13 @@ struct ProviderChip: View {
                     .clipShape(RoundedRectangle(cornerRadius: 3))
             }
             Text(name.count > 11 ? String(name.prefix(9)) + "…" : name)
-                .font(.system(size: 10, weight: .medium))
-                .foregroundColor(.mkText.opacity(0.75))
+                .font(.system(size: 10, weight: .semibold))
+                .foregroundColor(.mkText.opacity(0.9))
         }
-        .padding(.horizontal, 8).padding(.vertical, 4)
-        .background(Color.mkSurface)
+        .padding(.horizontal, 9).padding(.vertical, 4)
+        .background(Color.white.opacity(0.07))
         .clipShape(Capsule())
-        .overlay(Capsule().stroke(Color.mkBorder, lineWidth: 1))
+        .overlay(Capsule().stroke(Color.white.opacity(0.18), lineWidth: 1))
     }
 }
 
@@ -897,14 +897,14 @@ struct RatingChip: View {
                 Circle().fill(entry.color).frame(width: 7, height: 7)
             }
             VStack(alignment: .leading, spacing: 0) {
-                Text(entry.label).font(.system(size: 8)).foregroundColor(.mkMuted)
-                Text(entry.value).font(.system(size: 11, weight: .semibold)).foregroundColor(.mkText)
+                Text(entry.label).font(.system(size: 8)).foregroundColor(entry.color.opacity(0.8))
+                Text(entry.value).font(.system(size: 11, weight: .bold)).foregroundColor(.mkText)
             }
         }
         .padding(.horizontal, 8).padding(.vertical, 5)
-        .background(Color.mkBackground)
+        .background(entry.color.opacity(0.12))
         .clipShape(RoundedRectangle(cornerRadius: 8))
-        .overlay(RoundedRectangle(cornerRadius: 8).stroke(entry.color.opacity(0.3), lineWidth: 1))
+        .overlay(RoundedRectangle(cornerRadius: 8).stroke(entry.color.opacity(0.45), lineWidth: 1))
     }
 }
 
