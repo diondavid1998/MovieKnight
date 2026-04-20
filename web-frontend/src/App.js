@@ -670,6 +670,7 @@ function App() {
   const [catalogPage, setCatalogPage] = useState(1);
   const [installPrompt, setInstallPrompt] = useState(null);
   const [showIosTip, setShowIosTip] = useState(false);
+  const [platformSaveKey, setPlatformSaveKey] = useState(0);
   const abortRef = useRef(null);
 
   // buildApiErrorMessage imported from utils.js
@@ -831,7 +832,7 @@ function App() {
     } finally {
       setLoadingMovies(false);
     }
-  }, [isBypassMode, mediaTypeFilter, sortBy, catalogPage, serviceFilters, languageFilters, genreFilters, token]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [isBypassMode, mediaTypeFilter, sortBy, catalogPage, serviceFilters, languageFilters, genreFilters, token, platformSaveKey]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const formatMediaType = (value) => {
     if (value === 'documentary') {
@@ -1145,7 +1146,7 @@ function App() {
       setShowSettings(false);
       setCatalogPage(1);
       setInfo('Platforms saved.');
-      await fetchMovies();
+      setPlatformSaveKey((k) => k + 1);
     } catch (err) {
       if (err.message !== 'Unauthorized') {
         setError(`Network error: ${err.message}. Make sure the backend is running at ${API_BASE}.`);
@@ -1583,7 +1584,7 @@ function App() {
               </div>
             ) : null}
 
-            {loadingMovies ? (
+            {(loadingMovies || (!movies.length && catalogMeta?.refreshing)) ? (
               <div style={styles.movieList}>
                 {Array.from({ length: 6 }).map((_, i) => (
                   <div key={i} style={{ ...styles.movieCard, opacity: 0.45 }} className="movie-card-wrap">
@@ -1679,11 +1680,9 @@ function App() {
               </div>
             )}
 
-            {!movies.length && !loadingMovies ? (
+            {!movies.length && !loadingMovies && !catalogMeta?.refreshing ? (
               <div style={styles.emptyState}>
-                {catalogMeta?.refreshing
-                  ? '⏳ Building your catalog… Hang tight, this takes a moment on first load. The page will refresh automatically.'
-                  : 'No catalog titles match the current filters.'}
+                No catalog titles match the current filters.
               </div>
             ) : null}
             {totalPages > 1 ? (

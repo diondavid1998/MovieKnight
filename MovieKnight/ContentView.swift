@@ -393,11 +393,15 @@ struct CatalogView: View {
 
             Divider().overlay(Color.mkBorder)
 
-            if isLoading {
+            if isLoading || (movies.isEmpty && meta?.refreshing == true) {
                 Spacer()
                 VStack(spacing: 10) {
                     ProgressView().tint(.mkAccent)
-                    Text("Loading catalog…").font(.caption).foregroundColor(.mkMuted)
+                    Text(meta?.refreshing == true && !isLoading
+                         ? "Building your catalog… check back in a moment."
+                         : "Loading catalog…")
+                        .font(.caption).foregroundColor(.mkMuted)
+                        .multilineTextAlignment(.center).padding(.horizontal, 40)
                 }
                 Spacer()
             } else if movies.isEmpty && !isLoading {
