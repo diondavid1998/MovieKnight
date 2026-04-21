@@ -6,8 +6,7 @@
 //
 
 import SwiftUI
-
-// MARK: - App State
+import PhotosUI
 
 @MainActor
 final class AppState: ObservableObject {
@@ -18,17 +17,20 @@ final class AppState: ObservableObject {
     @Published var username: String = ""
     @Published var selectedPlatforms: [String] = []
     @Published var selectedLanguages: [String] = []
+    @Published var watchedIds: Set<String> = []
 
-    private let tokenKey    = "mk_token"
-    private let usernameKey = "mk_username"
+    private let tokenKey     = "mk_token"
+    private let usernameKey  = "mk_username"
     private let platformsKey = "mk_platforms"
     private let languagesKey = "mk_languages"
+    private let watchedKey   = "mk_watched_ids"
 
     init() {
         token    = UserDefaults.standard.string(forKey: tokenKey)?.trimmingCharacters(in: .whitespaces) ?? ""
         username = UserDefaults.standard.string(forKey: usernameKey) ?? ""
         selectedPlatforms = UserDefaults.standard.stringArray(forKey: platformsKey) ?? []
         selectedLanguages = UserDefaults.standard.stringArray(forKey: languagesKey) ?? []
+        watchedIds = Set(UserDefaults.standard.stringArray(forKey: watchedKey) ?? [])
         page = token.isEmpty ? .auth : .catalog
     }
 
@@ -37,7 +39,6 @@ final class AppState: ObservableObject {
         self.username = username
         UserDefaults.standard.set(self.token, forKey: tokenKey)
         UserDefaults.standard.set(username,   forKey: usernameKey)
-        // New users go through platform setup first
         page = isNewUser ? .platforms : .catalog
     }
 
@@ -51,12 +52,28 @@ final class AppState: ObservableObject {
         UserDefaults.standard.set(languages, forKey: languagesKey)
     }
 
+    func updateToken(_ newToken: String) {
+        token = newToken.trimmingCharacters(in: .whitespaces)
+        UserDefaults.standard.set(token, forKey: tokenKey)
+    }
+
+    func updateUsername(_ newUsername: String) {
+        username = newUsername
+        UserDefaults.standard.set(username, forKey: usernameKey)
+    }
+
+    func setWatched(_ id: String, watched: Bool) {
+        if watched { watchedIds.insert(id) } else { watchedIds.remove(id) }
+        UserDefaults.standard.set(Array(watchedIds), forKey: watchedKey)
+    }
+
     func logout() {
-        token = ""; username = ""; selectedPlatforms = []; selectedLanguages = []
+        token = ""; username = ""; selectedPlatforms = []; selectedLanguages = []; watchedIds = []
         UserDefaults.standard.removeObject(forKey: tokenKey)
         UserDefaults.standard.removeObject(forKey: usernameKey)
         UserDefaults.standard.removeObject(forKey: platformsKey)
         UserDefaults.standard.removeObject(forKey: languagesKey)
+        UserDefaults.standard.removeObject(forKey: watchedKey)
         page = .auth
     }
 }
@@ -91,7 +108,7 @@ struct LoadingView: View {
                 .frame(width: 100, height: 100)
                 .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
                 .shadow(color: .mkAccent.opacity(0.4), radius: 12, x: 0, y: 4)
-            Text("StreamScore")
+            Text("StreamScout")
                 .font(.system(size: 30, weight: .bold, design: .rounded))
                 .foregroundStyle(LinearGradient(colors: [.mkAccent, .mkAccentAlt], startPoint: .leading, endPoint: .trailing))
             ProgressView().tint(.mkAccent).padding(.top, 8)
@@ -105,11 +122,21 @@ struct AuthView: View {
     @EnvironmentObject var app: AppState
 
     enum Mode: CaseIterable { case login, register }
+    enum ResetStep { case none, enterEmail, enterCode }
+
     @State private var mode: Mode = .login
     @State private var username = ""
     @State private var password = ""
+    @State private var registerEmail = ""
     @State private var isLoading = false
     @State private var errorMsg: String?
+    @State private var successMsg: String?
+
+    // Forgot password
+    @State private var resetStep: ResetStep = .none
+    @State private var resetEmail = ""
+    @State private var resetCode = ""
+    @State private var resetNewPass = ""
 
     var body: some View {
         ScrollView {
@@ -123,7 +150,7 @@ struct AuthView: View {
                         .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
                         .shadow(color: .mkAccent.opacity(0.45), radius: 14, x: 0, y: 6)
                         .padding(.top, 60)
-                    Text("StreamScore")
+                    Text("StreamScout")
                         .font(.system(size: 34, weight: .bold, design: .rounded))
                         .foregroundStyle(
                             LinearGradient(colors: [.mkAccent, .mkAccentAlt], startPoint: .leading, endPoint: .trailing)
@@ -136,42 +163,13 @@ struct AuthView: View {
 
                 // Card
                 VStack(spacing: 18) {
-                    // Mode toggle
-                    HStack(spacing: 0) {
-                        ForEach(Mode.allCases, id: \.self) { m in
-                            Button {
-                                withAnimation(.spring(duration: 0.22)) { mode = m; errorMsg = nil }
-                            } label: {
-                                Text(m == .login ? "Sign In" : "Register")
-                                    .font(.system(size: 14, weight: .semibold))
-                                    .frame(maxWidth: .infinity)
-                                    .padding(.vertical, 10)
-                                    .background(mode == m ? Color.mkAccent : Color.clear)
-                                    .foregroundColor(mode == m ? .white : .mkMuted)
-                                    .clipShape(RoundedRectangle(cornerRadius: 10))
-                            }
-                        }
+                    if resetStep == .enterEmail {
+                        resetEmailCard
+                    } else if resetStep == .enterCode {
+                        resetCodeCard
+                    } else {
+                        mainAuthCard
                     }
-                    .padding(4)
-                    .background(Color.mkBackground)
-                    .clipShape(RoundedRectangle(cornerRadius: 13))
-
-                    MKTextField(placeholder: "Username", text: $username, icon: "person.fill")
-                    MKTextField(placeholder: "Password", text: $password, icon: "lock.fill", isSecure: true)
-
-                    if let err = errorMsg {
-                        Text(err)
-                            .font(.caption)
-                            .foregroundColor(.mkAccent)
-                            .multilineTextAlignment(.center)
-                            .padding(.horizontal, 4)
-                    }
-
-                    MKButton(
-                        label: isLoading ? "Working…" : (mode == .login ? "Sign In" : "Create Account"),
-                        icon: mode == .login ? "arrow.right.circle.fill" : "person.badge.plus",
-                        isLoading: isLoading
-                    ) { Task { await authenticate() } }
                 }
                 .padding(24)
                 .background(Color.mkSurface)
@@ -184,19 +182,135 @@ struct AuthView: View {
         .scrollBounceBasedOnSize()
     }
 
+    // MARK: Main auth card
+
+    var mainAuthCard: some View {
+        VStack(spacing: 18) {
+            HStack(spacing: 0) {
+                ForEach(Mode.allCases, id: \.self) { m in
+                    Button {
+                        withAnimation(.spring(duration: 0.22)) { mode = m; clearMessages() }
+                    } label: {
+                        Text(m == .login ? "Sign In" : "Register")
+                            .font(.system(size: 14, weight: .semibold))
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 10)
+                            .background(mode == m ? Color.mkAccent : Color.clear)
+                            .foregroundColor(mode == m ? .white : .mkMuted)
+                            .clipShape(RoundedRectangle(cornerRadius: 10))
+                    }
+                }
+            }
+            .padding(4)
+            .background(Color.mkBackground)
+            .clipShape(RoundedRectangle(cornerRadius: 13))
+
+            MKTextField(placeholder: "Username", text: $username, icon: "person.fill")
+
+            if mode == .register {
+                MKTextField(placeholder: "Email (optional — for password reset)", text: $registerEmail, icon: "envelope.fill")
+                    .transition(.opacity.combined(with: .move(edge: .top)))
+            }
+
+            MKTextField(placeholder: "Password", text: $password, icon: "lock.fill", isSecure: true)
+
+            feedbackView
+
+            MKButton(
+                label: isLoading ? "Working…" : (mode == .login ? "Sign In" : "Create Account"),
+                icon: mode == .login ? "arrow.right.circle.fill" : "person.badge.plus",
+                isLoading: isLoading
+            ) { Task { await authenticate() } }
+
+            if mode == .login {
+                Button {
+                    withAnimation { resetStep = .enterEmail; clearMessages() }
+                } label: {
+                    Text("Forgot password?")
+                        .font(.system(size: 13))
+                        .foregroundColor(.mkMuted)
+                }
+            }
+        }
+    }
+
+    // MARK: Reset step 1 — enter email
+
+    var resetEmailCard: some View {
+        VStack(spacing: 18) {
+            VStack(spacing: 4) {
+                Text("Reset Password")
+                    .font(.system(size: 18, weight: .bold))
+                    .foregroundColor(.mkText)
+                Text("Enter the email on your account and we'll send a code.")
+                    .font(.caption)
+                    .foregroundColor(.mkMuted)
+                    .multilineTextAlignment(.center)
+            }
+            MKTextField(placeholder: "Email address", text: $resetEmail, icon: "envelope.fill")
+            feedbackView
+            MKButton(label: isLoading ? "Sending…" : "Send Reset Code",
+                     icon: "paperplane.fill", isLoading: isLoading) {
+                Task { await sendResetCode() }
+            }
+            Button { withAnimation { resetStep = .none; clearMessages() } } label: {
+                Text("← Back to Sign In").font(.system(size: 13)).foregroundColor(.mkMuted)
+            }
+        }
+    }
+
+    // MARK: Reset step 2 — enter code + new password
+
+    var resetCodeCard: some View {
+        VStack(spacing: 18) {
+            VStack(spacing: 4) {
+                Text("Enter Code")
+                    .font(.system(size: 18, weight: .bold))
+                    .foregroundColor(.mkText)
+                Text("Enter the 6-digit code sent to \(resetEmail) and your new password.")
+                    .font(.caption)
+                    .foregroundColor(.mkMuted)
+                    .multilineTextAlignment(.center)
+            }
+            MKTextField(placeholder: "6-digit code", text: $resetCode, icon: "number.circle.fill")
+            MKTextField(placeholder: "New password", text: $resetNewPass, icon: "lock.fill", isSecure: true)
+            feedbackView
+            MKButton(label: isLoading ? "Resetting…" : "Reset Password",
+                     icon: "checkmark.circle.fill", isLoading: isLoading) {
+                Task { await submitReset() }
+            }
+            Button { withAnimation { resetStep = .enterEmail; clearMessages() } } label: {
+                Text("← Re-send code").font(.system(size: 13)).foregroundColor(.mkMuted)
+            }
+        }
+    }
+
+    @ViewBuilder
+    var feedbackView: some View {
+        if let err = errorMsg {
+            Text(err).font(.caption).foregroundColor(.mkAccent)
+                .multilineTextAlignment(.center).padding(.horizontal, 4)
+        } else if let ok = successMsg {
+            Text(ok).font(.caption).foregroundColor(Color(red: 0.1, green: 0.8, blue: 0.5))
+                .multilineTextAlignment(.center).padding(.horizontal, 4)
+        }
+    }
+
+    func clearMessages() { errorMsg = nil; successMsg = nil }
+
+    // MARK: Auth
+
     func authenticate() async {
         let trimmedUser = username.trimmingCharacters(in: .whitespaces)
         guard !trimmedUser.isEmpty, !password.isEmpty else {
             errorMsg = "Please fill in both fields."; return
         }
-        guard trimmedUser.count >= 3 else {
-            errorMsg = "Username must be at least 3 characters."; return
-        }
-        isLoading = true; errorMsg = nil
+        isLoading = true; clearMessages()
         do {
+            var body: [String: Any] = ["username": trimmedUser, "password": password]
+            if mode == .register, !registerEmail.isEmpty { body["email"] = registerEmail }
             let resp: AuthResponse = try await APIService.shared.post(
-                mode == .login ? "/login" : "/register",
-                body: ["username": trimmedUser, "password": password]
+                mode == .login ? "/login" : "/register", body: body
             )
             if let t = resp.token {
                 app.saveSession(token: t, username: trimmedUser, isNewUser: mode == .register)
@@ -204,7 +318,49 @@ struct AuthView: View {
                 errorMsg = resp.error ?? "Authentication failed."
             }
         } catch {
-            errorMsg = (error as? APIError)?.errorDescription ?? "Network error. Is the backend running?"
+            errorMsg = (error as? APIError)?.errorDescription ?? "Network error."
+        }
+        isLoading = false
+    }
+
+    // MARK: Password Reset
+
+    func sendResetCode() async {
+        guard !resetEmail.isEmpty else { errorMsg = "Enter your email address."; return }
+        isLoading = true; clearMessages()
+        do {
+            let resp: ForgotPasswordResponse = try await APIService.shared.post(
+                "/auth/forgot-password", body: ["email": resetEmail]
+            )
+            _ = resp
+            successMsg = "Code sent! Check your email."
+            withAnimation { resetStep = .enterCode }
+        } catch {
+            // Backend always returns 200 so any error is a network issue
+            errorMsg = (error as? APIError)?.errorDescription ?? "Network error."
+        }
+        isLoading = false
+    }
+
+    func submitReset() async {
+        guard !resetCode.isEmpty, !resetNewPass.isEmpty else {
+            errorMsg = "Enter both the code and a new password."; return
+        }
+        isLoading = true; clearMessages()
+        do {
+            let resp: ForgotPasswordResponse = try await APIService.shared.post(
+                "/auth/reset-password",
+                body: ["email": resetEmail, "code": resetCode, "newPassword": resetNewPass]
+            )
+            if resp.success == true {
+                successMsg = "Password reset! Sign in with your new password."
+                withAnimation { resetStep = .none; mode = .login }
+                resetCode = ""; resetNewPass = ""
+            } else {
+                errorMsg = resp.error ?? "Invalid code or it has expired."
+            }
+        } catch {
+            errorMsg = (error as? APIError)?.errorDescription ?? "Network error."
         }
         isLoading = false
     }
@@ -253,7 +409,7 @@ struct PlatformsView: View {
             } else {
                 ScrollView {
                     VStack(spacing: 20) {
-                        Text("Select every service you subscribe to. StreamScore will show titles available across your chosen platforms.")
+                        Text("Select every service you subscribe to. StreamScout will show titles available across your chosen platforms.")
                             .font(.subheadline)
                             .foregroundColor(.mkMuted)
                             .multilineTextAlignment(.center)
@@ -430,11 +586,16 @@ struct CatalogView: View {
     @State private var sortBy       = "popularity"
     @State private var page         = 1
     @State private var totalPages   = 1
-    @State private var showSettings = false
+    @State private var showSettingsView = false
     @State private var showGenrePicker = false
     @State private var showLanguagePicker = false
+    @State private var showYearFilter = false
     @State private var genreFilters: Set<String> = []
     @State private var languageFilters: Set<String> = []
+    @State private var yearMin = ""
+    @State private var yearMax = ""
+    @State private var hideWatched = false
+    @State private var selectedDetail: CatalogItem? = nil
     @State private var pollingTask: Task<Void, Never>?
 
     static let allGenres: [(key: String, label: String)] = [
@@ -448,9 +609,7 @@ struct CatalogView: View {
     var body: some View {
         VStack(spacing: 0) {
             topBar.padding(.horizontal, 16).padding(.top, 16).padding(.bottom, 10)
-
             filterBar.padding(.bottom, 8)
-
             Divider().overlay(Color.mkBorder)
 
             if isLoading || (movies.isEmpty && meta?.refreshing == true) {
@@ -469,21 +628,13 @@ struct CatalogView: View {
                     Spacer()
                     VStack(spacing: 12) {
                         Image(systemName: "wifi.exclamationmark")
-                            .font(.system(size: 40))
-                            .foregroundColor(.mkAccent)
+                            .font(.system(size: 40)).foregroundColor(.mkAccent)
                         Text("Couldn't load titles")
-                            .font(.title3).bold()
-                            .foregroundColor(.mkMuted)
-                        Text(err)
-                            .font(.subheadline)
-                            .foregroundColor(.mkMuted.opacity(0.7))
-                            .multilineTextAlignment(.center)
-                            .padding(.horizontal, 40)
-                        MKButton(label: "Retry", icon: "arrow.clockwise") {
-                            Task { await fetch() }
-                        }
-                        .frame(maxWidth: 180)
-                        .padding(.top, 4)
+                            .font(.title3).bold().foregroundColor(.mkMuted)
+                        Text(err).font(.subheadline).foregroundColor(.mkMuted.opacity(0.7))
+                            .multilineTextAlignment(.center).padding(.horizontal, 40)
+                        MKButton(label: "Retry", icon: "arrow.clockwise") { Task { await fetch() } }
+                            .frame(maxWidth: 180).padding(.top, 4)
                     }
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                     Spacer()
@@ -495,7 +646,8 @@ struct CatalogView: View {
                     LazyVStack(spacing: 12) {
                         if let m = meta { metaBanner(m).padding(.horizontal, 16) }
                         ForEach(movies) { movie in
-                            MovieCardView(movie: movie).padding(.horizontal, 16)
+                            MovieCardView(movie: movie, onTap: { selectedDetail = movie })
+                                .padding(.horizontal, 16)
                         }
                         if totalPages > 1 { paginationBar.padding(.horizontal, 16).padding(.bottom, 24) }
                     }
@@ -503,30 +655,30 @@ struct CatalogView: View {
                 }
             }
         }
-        .sheet(isPresented: $showSettings) {
-            PlatformsView().environmentObject(app)
+        .sheet(isPresented: $showSettingsView) {
+            SettingsView().environmentObject(app)
         }
         .sheet(isPresented: $showGenrePicker) {
-            GenrePickerSheet(selected: $genreFilters) {
-                page = 1; Task { await fetch() }
-            }
+            GenrePickerSheet(selected: $genreFilters) { page = 1; Task { await fetch() } }
         }
         .sheet(isPresented: $showLanguagePicker) {
             LanguagePickerSheet(selected: $languageFilters, available: app.selectedLanguages) {
                 page = 1; Task { await fetch() }
             }
         }
+        .sheet(isPresented: $showYearFilter) {
+            YearFilterSheet(yearMin: $yearMin, yearMax: $yearMax) { page = 1; Task { await fetch() } }
+        }
+        .sheet(item: $selectedDetail) { movie in
+            DetailSheet(movie: movie).environmentObject(app)
+        }
         .task {
             if app.selectedPlatforms.isEmpty { await loadPlatforms() }
-            // If still no platforms after syncing with server, send user to setup
-            if app.selectedPlatforms.isEmpty {
-                showSettings = true
-                return
-            }
+            if app.selectedPlatforms.isEmpty { showSettingsView = true; return }
             await fetch()
             startPollingIfNeeded()
         }
-        .onChange(of: showSettings) { open in
+        .onChange(of: showSettingsView) { open in
             if !open { Task { await fetch() } }
         }
         .onDisappear { pollingTask?.cancel() }
@@ -537,7 +689,7 @@ struct CatalogView: View {
     var topBar: some View {
         HStack(alignment: .center, spacing: 10) {
             VStack(alignment: .leading, spacing: 2) {
-                Text("🎬 STREAMSCORE")
+                Text("🎬 STREAMSCOUT")
                     .font(.system(size: 11, weight: .semibold)).kerning(1.2)
                     .foregroundColor(.mkAccent)
                 Text("Streaming Catalog")
@@ -545,7 +697,7 @@ struct CatalogView: View {
             }
             Spacer()
             IconButton(icon: "arrow.clockwise", spinning: isLoading) { Task { await fetch() } }
-            IconButton(icon: "gearshape.fill") { showSettings = true }
+            IconButton(icon: "gearshape.fill") { showSettingsView = true }
             IconButton(icon: "rectangle.portrait.and.arrow.right") { app.logout() }
         }
     }
@@ -567,30 +719,38 @@ struct CatalogView: View {
                 } label: {
                     FilterChip(label: sortLabel, icon: "arrow.up.arrow.down", active: sortBy != "popularity")
                 }
-                // Genre multi-select
                 Button { showGenrePicker = true } label: {
                     FilterChip(
                         label: genreFilters.isEmpty ? "Genres" : "\(genreFilters.count) Genre\(genreFilters.count == 1 ? "" : "s")",
-                        icon: "theatermasks",
-                        active: !genreFilters.isEmpty
+                        icon: "theatermasks", active: !genreFilters.isEmpty
                     )
                 }
-                // Language filter (only shown when user has languages set up)
-                if !app.selectedLanguages.isEmpty {
-                    Button { showLanguagePicker = true } label: {
+                Button { showLanguagePicker = true } label: {
+                    FilterChip(
+                        label: languageFilters.isEmpty ? "Language" : "\(languageFilters.count) Lang\(languageFilters.count == 1 ? "" : "s")",
+                        icon: "globe", active: !languageFilters.isEmpty
+                    )
+                }
+                Button { showYearFilter = true } label: {
+                    FilterChip(
+                        label: (yearMin.isEmpty && yearMax.isEmpty) ? "Year" : "\(yearMin.isEmpty ? "…" : yearMin)–\(yearMax.isEmpty ? "…" : yearMax)",
+                        icon: "calendar", active: !yearMin.isEmpty || !yearMax.isEmpty
+                    )
+                }
+                if !app.watchedIds.isEmpty {
+                    Button {
+                        hideWatched.toggle(); page = 1; Task { await fetch() }
+                    } label: {
                         FilterChip(
-                            label: languageFilters.isEmpty ? "Language" : "\(languageFilters.count) Lang\(languageFilters.count == 1 ? "" : "s")",
-                            icon: "globe",
-                            active: !languageFilters.isEmpty
+                            label: hideWatched ? "Hiding Watched" : "Hide Watched",
+                            icon: "eye.slash", active: hideWatched
                         )
                     }
                 }
-                // Services badge
                 if !app.selectedPlatforms.isEmpty {
                     HStack(spacing: 5) {
                         Image(systemName: "play.rectangle.on.rectangle").font(.system(size: 10))
-                        Text("\(app.selectedPlatforms.count) services")
-                            .font(.system(size: 12))
+                        Text("\(app.selectedPlatforms.count) services").font(.system(size: 12))
                     }
                     .foregroundColor(.mkMuted)
                     .padding(.horizontal, 10).padding(.vertical, 7)
@@ -610,14 +770,17 @@ struct CatalogView: View {
                 Image(systemName: "play.rectangle.on.rectangle").font(.system(size: 44)).foregroundColor(.mkMuted)
                 Text("No services selected").font(.title3).bold().foregroundColor(.mkMuted)
                 Text("Add your streaming services to see what's available to watch.")
-                    .font(.subheadline).foregroundColor(.mkMuted.opacity(0.7)).multilineTextAlignment(.center).padding(.horizontal, 40)
-                MKButton(label: "Add Services", icon: "plus.circle.fill") { showSettings = true }
+                    .font(.subheadline).foregroundColor(.mkMuted.opacity(0.7))
+                    .multilineTextAlignment(.center).padding(.horizontal, 40)
+                MKButton(label: "Add Services", icon: "plus.circle.fill") { showSettingsView = true }
                     .frame(maxWidth: 220).padding(.top, 4)
             } else {
                 Image(systemName: "popcorn").font(.system(size: 44)).foregroundColor(.mkMuted)
                 Text("No titles found").font(.title3).bold().foregroundColor(.mkMuted)
-                Text("Adjust your filters or add streaming services.").font(.subheadline).foregroundColor(.mkMuted.opacity(0.7)).multilineTextAlignment(.center).padding(.horizontal, 40)
-                MKButton(label: "Edit Services", icon: "gearshape.fill") { showSettings = true }
+                Text("Adjust your filters or add streaming services.")
+                    .font(.subheadline).foregroundColor(.mkMuted.opacity(0.7))
+                    .multilineTextAlignment(.center).padding(.horizontal, 40)
+                MKButton(label: "Edit Services", icon: "gearshape.fill") { showSettingsView = true }
                     .frame(maxWidth: 220).padding(.top, 4)
             }
         }
@@ -638,9 +801,7 @@ struct CatalogView: View {
 
     var paginationBar: some View {
         HStack(spacing: 12) {
-            Button {
-                page = max(1, page - 1); Task { await fetch() }
-            } label: {
+            Button { page = max(1, page - 1); Task { await fetch() } } label: {
                 Image(systemName: "chevron.left")
                     .frame(width: 40, height: 40)
                     .background(Color.mkSurface)
@@ -652,9 +813,7 @@ struct CatalogView: View {
             Text("Page \(page) of \(totalPages)")
                 .font(.caption).foregroundColor(.mkMuted).frame(maxWidth: .infinity)
 
-            Button {
-                page = min(totalPages, page + 1); Task { await fetch() }
-            } label: {
+            Button { page = min(totalPages, page + 1); Task { await fetch() } } label: {
                 Image(systemName: "chevron.right")
                     .frame(width: 40, height: 40)
                     .background(Color.mkSurface)
@@ -688,9 +847,7 @@ struct CatalogView: View {
         do {
             let resp: PlatformResponse = try await APIService.shared.get("/platforms", token: app.token)
             app.savePlatforms(resp.platforms)
-        } catch {
-            // Use cached platforms — no action needed
-        }
+        } catch { }
     }
 
     @MainActor func fetch() async {
@@ -700,29 +857,21 @@ struct CatalogView: View {
             "sortBy":    sortBy.isEmpty ? "popularity" : sortBy,
             "mediaType": mediaType.isEmpty ? "all" : mediaType
         ]
-        if !app.selectedPlatforms.isEmpty {
-            params["serviceFilters"] = app.selectedPlatforms.joined(separator: ",")
-        }
-        if !genreFilters.isEmpty {
-            params["genreFilters"] = genreFilters.joined(separator: ",")
-        }
-        if !languageFilters.isEmpty {
-            params["languageFilters"] = languageFilters.joined(separator: ",")
-        }
+        if !app.selectedPlatforms.isEmpty { params["serviceFilters"] = app.selectedPlatforms.joined(separator: ",") }
+        if !genreFilters.isEmpty          { params["genreFilters"]    = genreFilters.joined(separator: ",") }
+        if !languageFilters.isEmpty       { params["languageFilters"] = languageFilters.joined(separator: ",") }
+        if !yearMin.isEmpty               { params["yearMin"] = yearMin }
+        if !yearMax.isEmpty               { params["yearMax"] = yearMax }
+        if hideWatched && !app.watchedIds.isEmpty { params["hideWatched"] = "1" }
         do {
             let resp: CatalogResponse = try await APIService.shared.get("/movies", params: params, token: app.token)
-            // Surface any server-side error (e.g. DB not ready) instead of silently showing empty
             if let serverError = resp.error, resp.catalog.isEmpty {
-                errorMsg = serverError
-                isLoading = false
-                return
+                errorMsg = serverError; isLoading = false; return
             }
-            movies = resp.catalog
-            meta   = resp.meta
+            movies     = resp.catalog
+            meta       = resp.meta
             totalPages = resp.meta?.totalPages ?? max(1, Int(ceil(Double(resp.meta?.resultCount ?? 0) / 24.0)))
-            if meta?.refreshing == true {
-                startPollingIfNeeded()
-            }
+            if meta?.refreshing == true { startPollingIfNeeded() }
         } catch APIError.unauthorized {
             app.logout()
         } catch {
@@ -744,23 +893,41 @@ struct CatalogView: View {
         }
     }
 }
-
 // MARK: - Movie Card
 
 struct MovieCardView: View {
     let movie: CatalogItem
+    var onTap: () -> Void = {}
+    @EnvironmentObject var app: AppState
     var isTV: Bool { movie.mediaType == "tv" }
+    var isWatched: Bool { app.watchedIds.contains(movie.id) }
 
     var body: some View {
-        HStack(alignment: .top, spacing: 14) {
-            posterView
-            infoColumn
+        Button(action: onTap) {
+            HStack(alignment: .top, spacing: 14) {
+                posterView
+                infoColumn
+            }
+            .padding(14)
+            .background(Color.mkCard)
+            .clipShape(RoundedRectangle(cornerRadius: 18))
+            .overlay(RoundedRectangle(cornerRadius: 18).stroke(Color.mkBorder, lineWidth: 1))
+            .overlay(accentBar)
+            .overlay(watchedBadge, alignment: .topTrailing)
         }
-        .padding(14)
-        .background(Color.mkCard)
-        .clipShape(RoundedRectangle(cornerRadius: 18))
-        .overlay(RoundedRectangle(cornerRadius: 18).stroke(Color.mkBorder, lineWidth: 1))
-        .overlay(accentBar)
+        .buttonStyle(.plain)
+    }
+
+    var watchedBadge: some View {
+        Group {
+            if isWatched {
+                Image(systemName: "checkmark.circle.fill")
+                    .font(.system(size: 20))
+                    .foregroundColor(.green)
+                    .background(Circle().fill(Color.mkCard).padding(2))
+                    .padding(8)
+            }
+        }
     }
 
     // Left accent bar — blue for TV, red for movies
@@ -1255,6 +1422,715 @@ struct ScaleButtonStyle: ButtonStyle {
         configuration.label
             .scaleEffect(configuration.isPressed ? 0.95 : 1.0)
             .animation(.spring(duration: 0.18), value: configuration.isPressed)
+    }
+}
+
+// MARK: - Year Filter Sheet
+
+struct YearFilterSheet: View {
+    @Binding var yearMin: String
+    @Binding var yearMax: String
+    @Environment(\.dismiss) private var dismiss
+    let onApply: () -> Void
+
+    var body: some View {
+        NavigationView {
+            ZStack {
+                Color.mkBackground.ignoresSafeArea()
+                VStack(spacing: 24) {
+                    Text("Filter titles released within a year range. Leave either field blank to use no lower or upper bound.")
+                        .font(.subheadline).foregroundColor(.mkMuted)
+                        .multilineTextAlignment(.center).padding(.horizontal, 24).padding(.top, 8)
+                    HStack(spacing: 16) {
+                        VStack(alignment: .leading, spacing: 6) {
+                            Text("From Year").font(.caption).foregroundColor(.mkMuted)
+                            TextField("e.g. 2010", text: $yearMin)
+                                .keyboardType(.numberPad)
+                                .padding(12).background(Color.mkSurface)
+                                .clipShape(RoundedRectangle(cornerRadius: 12))
+                                .overlay(RoundedRectangle(cornerRadius: 12).stroke(Color.mkBorder, lineWidth: 1))
+                                .foregroundColor(.mkText)
+                        }
+                        VStack(alignment: .leading, spacing: 6) {
+                            Text("To Year").font(.caption).foregroundColor(.mkMuted)
+                            TextField("e.g. 2024", text: $yearMax)
+                                .keyboardType(.numberPad)
+                                .padding(12).background(Color.mkSurface)
+                                .clipShape(RoundedRectangle(cornerRadius: 12))
+                                .overlay(RoundedRectangle(cornerRadius: 12).stroke(Color.mkBorder, lineWidth: 1))
+                                .foregroundColor(.mkText)
+                        }
+                    }
+                    .padding(.horizontal, 24)
+                    if !yearMin.isEmpty || !yearMax.isEmpty {
+                        Button {
+                            yearMin = ""; yearMax = ""
+                        } label: {
+                            Label("Clear Year Filter", systemImage: "xmark.circle")
+                                .font(.subheadline).foregroundColor(.mkAccent)
+                        }
+                    }
+                    Spacer()
+                }
+                .padding(.top, 8)
+            }
+            .navigationTitle("Filter by Year")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .navigationBarLeading) {
+                    Button("Cancel") { dismiss() }.foregroundColor(.mkMuted)
+                }
+                ToolbarItem(placement: .navigationBarTrailing) {
+                    Button("Apply") { onApply(); dismiss() }
+                        .fontWeight(.semibold).foregroundColor(.mkAccent)
+                }
+            }
+        }
+    }
+}
+
+// MARK: - Detail Sheet
+
+struct DetailSheet: View {
+    let movie: CatalogItem
+    @EnvironmentObject var app: AppState
+    @Environment(\.dismiss) private var dismiss
+    @State private var details: TitleDetails?
+    @State private var isLoading = true
+    @State private var isTogglingWatched = false
+
+    var isWatched: Bool { app.watchedIds.contains(movie.id) }
+    var mediaType: String { movie.mediaType ?? "movie" }
+    var tmdbId: String {
+        let parts = movie.id.split(separator: "-")
+        return parts.count >= 2 ? String(parts.last!) : movie.id
+    }
+
+    var body: some View {
+        NavigationView {
+            ZStack {
+                Color.mkBackground.ignoresSafeArea()
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 0) {
+                        backdropSection
+                        VStack(alignment: .leading, spacing: 16) {
+                            titleSection
+                            if isLoading {
+                                HStack { Spacer(); ProgressView().tint(.mkAccent); Spacer() }
+                                    .padding(.top, 24)
+                            } else if let d = details {
+                                detailContent(d)
+                            }
+                        }
+                        .padding(20)
+                    }
+                }
+            }
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .navigationBarTrailing) {
+                    Button { dismiss() } label: {
+                        Image(systemName: "xmark.circle.fill")
+                            .font(.system(size: 22))
+                            .foregroundColor(.mkMuted)
+                    }
+                }
+                ToolbarItem(placement: .navigationBarLeading) {
+                    watchedButton
+                }
+            }
+        }
+        .task {
+            await loadDetails()
+            await loadWatched()
+        }
+    }
+
+    var backdropSection: some View {
+        Group {
+            if let urlStr = details?.backdropUrl ?? movie.posterUrl, let url = URL(string: urlStr) {
+                AsyncImage(url: url) { phase in
+                    switch phase {
+                    case .success(let img):
+                        img.resizable().scaledToFill()
+                            .frame(maxWidth: .infinity).frame(height: 220)
+                            .clipped()
+                            .overlay(
+                                LinearGradient(
+                                    gradient: Gradient(colors: [.clear, Color.mkBackground.opacity(0.85), Color.mkBackground]),
+                                    startPoint: .top, endPoint: .bottom
+                                )
+                            )
+                    default:
+                        Color.mkSurface.frame(height: 180)
+                    }
+                }
+            } else {
+                Color.mkSurface.frame(height: 120)
+            }
+        }
+    }
+
+    var titleSection: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text(movie.title)
+                .font(.system(size: 22, weight: .bold))
+                .foregroundColor(.mkText)
+            HStack(spacing: 8) {
+                TypeChip(label: (movie.mediaType ?? "movie") == "tv" ? "TV" : "Film",
+                         isTV: (movie.mediaType ?? "movie") == "tv")
+                if let y = movie.year { PillChip(text: String(y), color: .mkMuted) }
+                if let t = details?.tagline, !t.isEmpty {
+                    Text("· \(t)").font(.caption).foregroundColor(.mkMuted).lineLimit(1)
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
+    func detailContent(_ d: TitleDetails) -> some View {
+        if let overview = d.overview ?? movie.overview, !overview.isEmpty {
+            VStack(alignment: .leading, spacing: 6) {
+                Label("Overview", systemImage: "text.alignleft")
+                    .font(.system(size: 13, weight: .semibold)).foregroundColor(.mkAccent)
+                Text(overview)
+                    .font(.system(size: 14)).foregroundColor(.mkMuted).fixedSize(horizontal: false, vertical: true)
+            }
+        }
+        if let director = d.director, !director.isEmpty {
+            HStack(spacing: 8) {
+                Image(systemName: "camera.fill").foregroundColor(.mkAccent).font(.system(size: 13))
+                Text((movie.mediaType ?? "movie") == "tv" ? "Creator" : "Director")
+                    .font(.system(size: 13, weight: .semibold)).foregroundColor(.mkMuted)
+                Text(director).font(.system(size: 14)).foregroundColor(.mkText)
+            }
+        }
+        if let genres = movie.genres, !genres.isEmpty {
+            VStack(alignment: .leading, spacing: 6) {
+                Label("Genres", systemImage: "tag").font(.system(size: 13, weight: .semibold)).foregroundColor(.mkAccent)
+                HStack(spacing: 6) { ForEach(genres, id: \.self) { PillChip(text: $0, color: .mkMuted) } }
+            }
+        }
+        if let cast = d.cast, !cast.isEmpty {
+            VStack(alignment: .leading, spacing: 10) {
+                Label("Cast", systemImage: "person.2.fill")
+                    .font(.system(size: 13, weight: .semibold)).foregroundColor(.mkAccent)
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(alignment: .top, spacing: 12) {
+                        ForEach(cast.prefix(8)) { member in
+                            CastCell(member: member)
+                        }
+                    }
+                }
+            }
+        }
+        if let providers = movie.availableOn, !providers.isEmpty {
+            VStack(alignment: .leading, spacing: 6) {
+                Label("Available On", systemImage: "play.rectangle.on.rectangle")
+                    .font(.system(size: 13, weight: .semibold)).foregroundColor(.mkAccent)
+                HStack(spacing: 6) { ForEach(providers.prefix(6), id: \.self) { ProviderChip(name: $0) } }
+            }
+        }
+        ratingsSection
+    }
+
+    @ViewBuilder
+    var ratingsSection: some View {
+        let ratings = buildRatings()
+        if !ratings.isEmpty {
+            VStack(alignment: .leading, spacing: 6) {
+                Label("Ratings", systemImage: "star.fill")
+                    .font(.system(size: 13, weight: .semibold)).foregroundColor(.mkAccent)
+                HStack(spacing: 8) {
+                    ForEach(ratings, id: \.label) { r in RatingChip(entry: r) }
+                }
+            }
+        }
+    }
+
+    var watchedButton: some View {
+        Button {
+            Task { await toggleWatched() }
+        } label: {
+            HStack(spacing: 5) {
+                if isTogglingWatched {
+                    ProgressView().scaleEffect(0.75).tint(isWatched ? .mkMuted : .green)
+                } else {
+                    Image(systemName: isWatched ? "checkmark.circle.fill" : "circle")
+                        .foregroundColor(isWatched ? .green : .mkMuted)
+                }
+                Text(isWatched ? "Watched" : "Mark Watched")
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundColor(isWatched ? .green : .mkMuted)
+            }
+        }
+        .disabled(isTogglingWatched)
+    }
+
+    func loadDetails() async {
+        isLoading = true
+        do {
+            let d: TitleDetails = try await APIService.shared.get(
+                "/titles/\(mediaType)/\(tmdbId)/details", token: app.token
+            )
+            details = d
+        } catch { }
+        isLoading = false
+    }
+
+    func loadWatched() async {
+        guard app.watchedIds.isEmpty else { return }
+        do {
+            let resp: WatchedListResponse = try await APIService.shared.get("/watched", token: app.token)
+            for item in resp.items ?? [] { app.setWatched(item.itemId, watched: true) }
+        } catch { }
+    }
+
+    func toggleWatched() async {
+        isTogglingWatched = true
+        do {
+            if isWatched {
+                let _: ToggleWatchedResponse = try await APIService.shared.delete(
+                    "/watched/\(movie.id)", token: app.token
+                )
+                app.setWatched(movie.id, watched: false)
+            } else {
+                let body: [String: String] = ["itemId": movie.id, "title": movie.title,
+                                               "mediaType": mediaType, "tmdbId": tmdbId,
+                                               "posterUrl": movie.posterUrl ?? ""]
+                let _: ToggleWatchedResponse = try await APIService.shared.post(
+                    "/watched", body: body, token: app.token
+                )
+                app.setWatched(movie.id, watched: true)
+            }
+        } catch { }
+        isTogglingWatched = false
+    }
+
+    func buildRatings() -> [MovieCardView.RatingEntry] {
+        var out: [MovieCardView.RatingEntry] = []
+        if let v = movie.tmdbRating, v > 0 {
+            out.append(.init(label: "TMDb", value: String(format: "%.1f", v), logoAsset: "tmdb",
+                             color: Color(red: 0.133, green: 0.729, blue: 0.502)))
+        }
+        if let v = movie.imdbRating, !v.isEmpty, v != "N/A" {
+            out.append(.init(label: "IMDb", value: v, logoAsset: "imdb",
+                             color: Color(red: 0.945, green: 0.702, blue: 0.102)))
+        }
+        if let v = movie.rottenTomatoesRating, !v.isEmpty, v != "N/A" {
+            let numStr = v.components(separatedBy: CharacterSet.decimalDigits.inverted).joined()
+            let pct = Int(numStr) ?? 0
+            let fresh = pct >= 60
+            out.append(.init(label: "RT", value: "\(pct)%", logoAsset: fresh ? "rt_fresh" : "rt_rotten",
+                             color: fresh ? Color(red: 0.98, green: 0.36, blue: 0.22) : Color(red: 0.5, green: 0.7, blue: 0.22)))
+        }
+        if let v = movie.metacriticRating, !v.isEmpty, v != "N/A" {
+            out.append(.init(label: "MC", value: v, logoAsset: "metacritic",
+                             color: Color(red: 1.0, green: 0.69, blue: 0.0)))
+        }
+        return out
+    }
+}
+
+struct CastCell: View {
+    let member: CastMember
+    var body: some View {
+        VStack(spacing: 5) {
+            Group {
+                if let urlStr = member.profileUrl, let url = URL(string: urlStr) {
+                    AsyncImage(url: url) { phase in
+                        switch phase {
+                        case .success(let img): img.resizable().scaledToFill()
+                        default: placeholderPerson
+                        }
+                    }
+                } else { placeholderPerson }
+            }
+            .frame(width: 64, height: 80)
+            .clipShape(RoundedRectangle(cornerRadius: 10))
+            .overlay(RoundedRectangle(cornerRadius: 10).stroke(Color.mkBorder, lineWidth: 1))
+            Text(member.name)
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundColor(.mkText).lineLimit(2).multilineTextAlignment(.center)
+                .frame(width: 64)
+            if let char = member.character, !char.isEmpty {
+                Text(char).font(.system(size: 10)).foregroundColor(.mkMuted)
+                    .lineLimit(1).frame(width: 64)
+            }
+        }
+    }
+    var placeholderPerson: some View {
+        ZStack {
+            Color.mkSurface
+            Image(systemName: "person.fill").foregroundColor(.mkMuted.opacity(0.4))
+        }
+    }
+}
+
+// MARK: - Settings View
+
+struct SettingsView: View {
+    enum Tab: String { case services, profile, watchlist }
+    @EnvironmentObject var app: AppState
+    @Environment(\.dismiss) private var dismiss
+    @State private var tab: Tab = .services
+
+    var body: some View {
+        NavigationView {
+            ZStack {
+                Color.mkBackground.ignoresSafeArea()
+                VStack(spacing: 0) {
+                    tabPicker.padding(.horizontal, 16).padding(.vertical, 10)
+                    Divider().overlay(Color.mkBorder)
+                    TabView(selection: $tab) {
+                        ServicesTabView().environmentObject(app).tag(Tab.services)
+                        ProfileTabView().environmentObject(app).tag(Tab.profile)
+                        WatchlistTabView().environmentObject(app).tag(Tab.watchlist)
+                    }
+                    .tabViewStyle(.page(indexDisplayMode: .never))
+                    .animation(.easeInOut(duration: 0.2), value: tab)
+                }
+            }
+            .navigationTitle("Settings")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .navigationBarTrailing) {
+                    Button("Done") { dismiss() }.fontWeight(.semibold).foregroundColor(.mkAccent)
+                }
+            }
+        }
+    }
+
+    var tabPicker: some View {
+        HStack(spacing: 0) {
+            ForEach([(Tab.services, "play.rectangle.on.rectangle", "Services"),
+                     (Tab.profile, "person.crop.circle", "Profile"),
+                     (Tab.watchlist, "checkmark.circle", "Watched")], id: \.0.rawValue) { t, icon, label in
+                Button {
+                    withAnimation(.easeInOut(duration: 0.2)) { tab = t }
+                } label: {
+                    VStack(spacing: 4) {
+                        Image(systemName: icon).font(.system(size: 16))
+                        Text(label).font(.system(size: 12, weight: .semibold))
+                    }
+                    .foregroundColor(tab == t ? .mkAccent : .mkMuted)
+                    .frame(maxWidth: .infinity).padding(.vertical, 10)
+                    .background(tab == t ? Color.mkAccent.opacity(0.1) : Color.clear)
+                    .clipShape(RoundedRectangle(cornerRadius: 12))
+                }
+            }
+        }
+        .background(Color.mkSurface).clipShape(RoundedRectangle(cornerRadius: 14))
+    }
+}
+
+// MARK: Services Tab
+
+struct ServicesTabView: View {
+    @EnvironmentObject var app: AppState
+    @State private var isSaving = false
+    @State private var savedMsg = ""
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 24) {
+                Text("Streaming Services").font(.title3).bold().foregroundColor(.mkText).padding(.top, 4)
+                Text("Select every service you subscribe to.").font(.subheadline).foregroundColor(.mkMuted)
+                LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 12), count: 3), spacing: 12) {
+                    ForEach(allPlatforms) { platform in
+                        PlatformToggle(platform: platform, isSelected: app.selectedPlatforms.contains(platform.key)) {
+                            if app.selectedPlatforms.contains(platform.key) {
+                                app.selectedPlatforms.removeAll { $0 == platform.key }
+                            } else {
+                                app.selectedPlatforms.append(platform.key)
+                            }
+                        }
+                    }
+                }
+                .padding(.horizontal, 2)
+                Text("Content Languages").font(.title3).bold().foregroundColor(.mkText)
+                Text("Filter catalog by language preference.").font(.subheadline).foregroundColor(.mkMuted)
+                LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 12), count: 3), spacing: 12) {
+                    ForEach(allLanguages) { lang in
+                        LanguageToggle(language: lang, isSelected: app.selectedLanguages.contains(lang.key)) {
+                            if app.selectedLanguages.contains(lang.key) {
+                                app.selectedLanguages.removeAll { $0 == lang.key }
+                            } else {
+                                app.selectedLanguages.append(lang.key)
+                            }
+                        }
+                    }
+                }
+                .padding(.horizontal, 2)
+                if !savedMsg.isEmpty {
+                    Text(savedMsg).font(.subheadline).foregroundColor(.green).frame(maxWidth: .infinity)
+                }
+                MKButton(label: "Save Services", icon: "checkmark.circle.fill", isLoading: isSaving) {
+                    Task { await saveServices() }
+                }
+                .padding(.bottom, 24)
+            }
+            .padding(.horizontal, 16).padding(.top, 12)
+        }
+    }
+
+    func saveServices() async {
+        isSaving = true
+        do {
+            let body: [String: Any] = [
+                "platforms": app.selectedPlatforms,
+                "languages": app.selectedLanguages
+            ]
+            let _: GenericResponse = try await APIService.shared.put("/platforms", body: body, token: app.token)
+            UserDefaults.standard.set(app.selectedPlatforms, forKey: "mk_platforms")
+            UserDefaults.standard.set(app.selectedLanguages, forKey: "mk_languages")
+            savedMsg = "Saved ✓"
+            DispatchQueue.main.asyncAfter(deadline: .now() + 2) { savedMsg = "" }
+        } catch { savedMsg = "Save failed" }
+        isSaving = false
+    }
+}
+
+struct PlatformToggle: View {
+    let platform: StreamingPlatform
+    let isSelected: Bool
+    let action: () -> Void
+    var body: some View {
+        Button(action: action) {
+            VStack(spacing: 6) {
+                Image(platform.logoAsset).resizable().scaledToFit()
+                    .frame(width: 40, height: 40)
+                    .clipShape(RoundedRectangle(cornerRadius: 10))
+                    .overlay(RoundedRectangle(cornerRadius: 10)
+                        .stroke(isSelected ? Color.mkAccent : Color.clear, lineWidth: 2))
+                Text(platform.name).font(.system(size: 11, weight: .semibold))
+                    .foregroundColor(isSelected ? .mkAccent : .mkMuted).lineLimit(1)
+            }
+            .padding(10)
+            .background(isSelected ? Color.mkAccent.opacity(0.1) : Color.mkSurface)
+            .clipShape(RoundedRectangle(cornerRadius: 14))
+            .overlay(RoundedRectangle(cornerRadius: 14).stroke(
+                isSelected ? Color.mkAccent.opacity(0.5) : Color.mkBorder, lineWidth: 1))
+        }
+        .buttonStyle(ScaleButtonStyle())
+    }
+}
+
+struct LanguageToggle: View {
+    let language: AppLanguage
+    let isSelected: Bool
+    let action: () -> Void
+    var body: some View {
+        Button(action: action) {
+            Text(language.label)
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundColor(isSelected ? .mkAccent : .mkMuted)
+                .frame(maxWidth: .infinity, minHeight: 44)
+                .background(isSelected ? Color.mkAccent.opacity(0.12) : Color.mkSurface)
+                .clipShape(RoundedRectangle(cornerRadius: 12))
+                .overlay(RoundedRectangle(cornerRadius: 12).stroke(
+                    isSelected ? Color.mkAccent.opacity(0.5) : Color.mkBorder, lineWidth: 1))
+        }
+        .buttonStyle(ScaleButtonStyle())
+    }
+}
+
+// MARK: Profile Tab
+
+struct ProfileTabView: View {
+    @EnvironmentObject var app: AppState
+    @State private var username = ""
+    @State private var email = ""
+    @State private var currentPassword = ""
+    @State private var newPassword = ""
+    @State private var isSaving = false
+    @State private var message = ""
+    @State private var messageIsError = false
+    @State private var avatarItem: PhotosPickerItem?
+    @State private var avatarUIImage: UIImage?
+    @State private var profilePicBase64: String?
+    @State private var isLoadingAccount = true
+
+    var body: some View {
+        ScrollView {
+            VStack(spacing: 20) {
+                avatarSection
+                VStack(spacing: 14) {
+                    MKTextField(placeholder: "Username", text: $username, icon: "person")
+                    MKTextField(placeholder: "Email address", text: $email, icon: "envelope")
+                    Divider().overlay(Color.mkBorder)
+                    Text("Change Password").font(.subheadline).foregroundColor(.mkMuted).frame(maxWidth: .infinity, alignment: .leading)
+                    MKTextField(placeholder: "Current password", text: $currentPassword, icon: "lock", isSecure: true)
+                    MKTextField(placeholder: "New password", text: $newPassword, icon: "lock.open", isSecure: true)
+                }
+                if !message.isEmpty {
+                    Text(message)
+                        .font(.subheadline)
+                        .foregroundColor(messageIsError ? .red : .green)
+                        .frame(maxWidth: .infinity)
+                }
+                MKButton(label: "Save Changes", icon: "checkmark.circle.fill", isLoading: isSaving) {
+                    Task { await saveProfile() }
+                }
+                .padding(.bottom, 24)
+            }
+            .padding(.horizontal, 16).padding(.top, 12)
+        }
+        .task { await loadAccount() }
+        .onChange(of: avatarItem) { item in
+            Task { await loadAvatar(from: item) }
+        }
+    }
+
+    var avatarSection: some View {
+        VStack(spacing: 10) {
+            ZStack {
+                if let img = avatarUIImage {
+                    Image(uiImage: img).resizable().scaledToFill()
+                } else {
+                    Image(systemName: "person.circle.fill")
+                        .resizable().foregroundColor(.mkMuted.opacity(0.5))
+                }
+            }
+            .frame(width: 88, height: 88)
+            .clipShape(Circle())
+            .overlay(Circle().stroke(Color.mkAccent.opacity(0.4), lineWidth: 2))
+            PhotosPicker(selection: $avatarItem, matching: .images) {
+                Label("Change Photo", systemImage: "camera.fill")
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundColor(.mkAccent)
+            }
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.top, 8)
+    }
+
+    func loadAccount() async {
+        isLoadingAccount = true
+        do {
+            let info: AccountInfo = try await APIService.shared.get("/account", token: app.token)
+            username = info.username ?? ""
+            email = info.email ?? ""
+            if let pic = info.profilePic, pic.hasPrefix("data:image/"),
+               let data = Data(base64Encoded: pic.components(separatedBy: ",").last ?? ""),
+               let img = UIImage(data: data) {
+                avatarUIImage = img
+            }
+        } catch { }
+        isLoadingAccount = false
+    }
+
+    func loadAvatar(from item: PhotosPickerItem?) async {
+        guard let item else { return }
+        guard let data = try? await item.loadTransferable(type: Data.self),
+              let srcImg = UIImage(data: data) else { return }
+        let size = CGSize(width: 256, height: 256)
+        let renderer = UIGraphicsImageRenderer(size: size)
+        let resized = renderer.image { _ in srcImg.draw(in: CGRect(origin: .zero, size: size)) }
+        avatarUIImage = resized
+        if let jpegData = resized.jpegData(compressionQuality: 0.8) {
+            profilePicBase64 = "data:image/jpeg;base64," + jpegData.base64EncodedString()
+        }
+    }
+
+    func saveProfile() async {
+        isSaving = true; message = ""; messageIsError = false
+        var body: [String: String] = [:]
+        let trimUser = username.trimmingCharacters(in: .whitespaces)
+        let trimEmail = email.trimmingCharacters(in: .whitespaces)
+        if !trimUser.isEmpty  { body["username"] = trimUser }
+        if !trimEmail.isEmpty { body["email"] = trimEmail }
+        if !newPassword.isEmpty {
+            if currentPassword.isEmpty {
+                message = "Enter your current password to change it"; messageIsError = true
+                isSaving = false; return
+            }
+            body["currentPassword"] = currentPassword
+            body["newPassword"] = newPassword
+        }
+        if let pic = profilePicBase64 { body["profilePic"] = pic }
+        do {
+            let resp: UpdateAccountResponse = try await APIService.shared.put("/account", body: body, token: app.token)
+            if let newToken = resp.token { app.updateToken(newToken) }
+            if let newUser = body["username"] { app.updateUsername(newUser) }
+            message = "Saved ✓"; messageIsError = false
+            currentPassword = ""; newPassword = ""
+        } catch {
+            message = (error as? APIError)?.errorDescription ?? "Update failed"
+            messageIsError = true
+        }
+        isSaving = false
+    }
+}
+
+// MARK: Watchlist Tab
+
+struct WatchlistTabView: View {
+    @EnvironmentObject var app: AppState
+    @State private var watchedItems: [WatchedItem] = []
+    @State private var isLoading = true
+    @State private var errorMsg: String?
+
+    var body: some View {
+        Group {
+            if isLoading {
+                VStack { Spacer(); ProgressView().tint(.mkAccent); Spacer() }
+            } else if watchedItems.isEmpty {
+                VStack(spacing: 12) {
+                    Spacer()
+                    Image(systemName: "checkmark.circle").font(.system(size: 44)).foregroundColor(.mkMuted)
+                    Text("No watched titles yet").font(.title3).bold().foregroundColor(.mkMuted)
+                    Text("Mark titles as watched from the catalog to track them here.")
+                        .font(.subheadline).foregroundColor(.mkMuted.opacity(0.7))
+                        .multilineTextAlignment(.center).padding(.horizontal, 40)
+                    Spacer()
+                }
+            } else {
+                List {
+                    ForEach(watchedItems) { item in
+                        HStack(spacing: 12) {
+                            Image(systemName: (item.mediaType ?? "movie") == "tv" ? "tv" : "film")
+                                .foregroundColor(.mkAccent).frame(width: 24)
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(item.title ?? "Unknown Title").font(.system(size: 15, weight: .semibold)).foregroundColor(.mkText)
+                                Text((item.mediaType ?? "movie") == "tv" ? "TV Show" : "Movie")
+                                    .font(.caption).foregroundColor(.mkMuted)
+                            }
+                            Spacer()
+                            Image(systemName: "checkmark.circle.fill").foregroundColor(.green)
+                        }
+                        .listRowBackground(Color.mkSurface)
+                    }
+                    .onDelete { offsets in Task { await removeItems(at: offsets) } }
+                }
+                .listStyle(.plain)
+                .background(Color.mkBackground)
+            }
+        }
+        .task { await loadWatched() }
+    }
+
+    func loadWatched() async {
+        isLoading = true
+        do {
+            let resp: WatchedListResponse = try await APIService.shared.get("/watched", token: app.token)
+            watchedItems = resp.items ?? []
+            for item in resp.items ?? [] { app.setWatched(item.itemId, watched: true) }
+        } catch { errorMsg = "Failed to load watchlist" }
+        isLoading = false
+    }
+
+    func removeItems(at offsets: IndexSet) async {
+        for i in offsets {
+            let item = watchedItems[i]
+            do {
+                let _: ToggleWatchedResponse = try await APIService.shared.delete(
+                    "/watched/\(item.itemId)", token: app.token
+                )
+                app.setWatched(item.itemId, watched: false)
+            } catch { }
+        }
+        watchedItems.remove(atOffsets: offsets)
     }
 }
 

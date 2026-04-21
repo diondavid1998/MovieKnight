@@ -4,7 +4,7 @@ import Foundation
 
 struct API {
     static let baseURL = "https://streamscore-backend-production.up.railway.app"
-    static let appName = "StreamScore"
+    static let appName = "StreamScout"
 }
 
 // MARK: - Errors
@@ -144,6 +144,71 @@ struct CatalogResponse: Decodable {
     var catalog: [CatalogItem] { items ?? movies ?? [] }
 }
 
+// MARK: - Title Details
+
+struct CastMember: Decodable, Identifiable {
+    let id: Int
+    let name: String
+    let character: String
+    let profileUrl: String?
+}
+
+struct TitleDetails: Decodable {
+    let tmdbId: Int?
+    let title: String?
+    let overview: String?
+    let tagline: String?
+    let posterUrl: String?
+    let backdropUrl: String?
+    let releaseDate: String?
+    let runtime: Int?
+    let numberOfSeasons: Int?
+    let genres: [String]?
+    let directors: [String]?
+    let cast: [CastMember]?
+}
+
+// MARK: - Watched List
+
+struct WatchedItem: Decodable, Identifiable {
+    var id: String { itemId }
+    let itemId: String
+    let mediaType: String?
+    let title: String?
+    let posterUrl: String?
+}
+
+struct WatchedListResponse: Decodable {
+    let items: [WatchedItem]?
+}
+
+struct ToggleWatchedResponse: Decodable {
+    let success: Bool?
+    let watched: Bool?
+    let error: String?
+}
+
+// MARK: - Account
+
+struct AccountInfo: Decodable {
+    let username: String?
+    let email: String?
+    let profilePic: String?
+}
+
+struct UpdateAccountResponse: Decodable {
+    let success: Bool?
+    let token: String?
+    let error: String?
+}
+
+// MARK: - Password Reset
+
+struct ForgotPasswordResponse: Decodable {
+    let success: Bool?
+    let error: String?
+}
+
 // MARK: - API Service
 
 final class APIService {
@@ -185,6 +250,16 @@ final class APIService {
         req.setValue("application/json", forHTTPHeaderField: "Content-Type")
         if let t = token, !t.isEmpty { req.setValue("Bearer \(t)", forHTTPHeaderField: "Authorization") }
         req.httpBody = try JSONSerialization.data(withJSONObject: body)
+        return try await perform(req)
+    }
+
+    func delete<T: Decodable>(_ path: String, token: String? = nil) async throws -> T {
+        guard let url = URL(string: API.baseURL + path) else {
+            throw APIError.networkError(URLError(.badURL))
+        }
+        var req = URLRequest(url: url, timeoutInterval: 30)
+        req.httpMethod = "DELETE"
+        if let t = token, !t.isEmpty { req.setValue("Bearer \(t)", forHTTPHeaderField: "Authorization") }
         return try await perform(req)
     }
 

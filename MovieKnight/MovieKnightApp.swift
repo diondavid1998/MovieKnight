@@ -8,7 +8,7 @@
 import SwiftUI
 
 @main
-struct StreamScoreApp: App {
+struct StreamScoutApp: App {
     var body: some Scene {
         WindowGroup {
             ContentView()
