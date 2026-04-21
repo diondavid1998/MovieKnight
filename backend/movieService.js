@@ -284,6 +284,13 @@ async function fetchTitleDetails(mediaType, tmdbId, { includeExternalIds = true 
   });
 }
 
+async function fetchTitleWithCredits(mediaType, tmdbId) {
+  return fetchTmdb(`/${mediaType}/${tmdbId}`, {
+    append_to_response: 'credits',
+    language: 'en-US',
+  });
+}
+
 function normalizeProviders(details, providerMapById, region = DEFAULT_REGION) {
   const regionProviders = details['watch/providers']?.results?.[region]?.flatrate || [];
   const mappedProviders = regionProviders
@@ -514,6 +521,7 @@ module.exports = {
   fetchOmdbRatings,
   fetchCatalogByPlatforms,
   fetchTitleDetails,
+  fetchTitleWithCredits,
   isOmdbRateLimited,
   // Exported for unit testing
   buildRatingsPayload,

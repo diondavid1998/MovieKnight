@@ -28,7 +28,36 @@ db.all('PRAGMA table_info(users)', [], (err, columns) => {
   if (!columns.some((col) => col.name === 'languages')) {
     db.run("ALTER TABLE users ADD COLUMN languages TEXT DEFAULT '[]'");
   }
+  if (!columns.some((col) => col.name === 'email')) {
+    db.run('ALTER TABLE users ADD COLUMN email TEXT');
+  }
+  if (!columns.some((col) => col.name === 'profile_pic')) {
+    db.run('ALTER TABLE users ADD COLUMN profile_pic TEXT');
+  }
 });
+
+db.run(`CREATE TABLE IF NOT EXISTS watched_items (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  user_id INTEGER NOT NULL,
+  item_id TEXT NOT NULL,
+  media_type TEXT,
+  title TEXT,
+  poster_url TEXT,
+  watched_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE(user_id, item_id),
+  FOREIGN KEY (user_id) REFERENCES users(id)
+)`);
+
+db.run(`CREATE TABLE IF NOT EXISTS reset_tokens (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  user_id INTEGER NOT NULL,
+  token_hash TEXT NOT NULL,
+  email TEXT NOT NULL,
+  expires_at DATETIME NOT NULL,
+  used INTEGER DEFAULT 0,
+  created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY (user_id) REFERENCES users(id)
+)`);
 
 ensureCatalogTables(db).catch((error) => {
   console.error('Failed to initialize catalog cache tables:', error);

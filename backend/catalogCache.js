@@ -599,6 +599,9 @@ async function readCachedCatalog(
     serviceFilters = [],
     languageFilters = [],
     genreFilters = [],
+    yearMin = null,
+    yearMax = null,
+    excludeItemIds = [],
   }
 ) {
   const filters = ['scope_key = ?'];
@@ -606,6 +609,7 @@ async function readCachedCatalog(
   const normalizedServiceFilters = [...new Set(serviceFilters.filter(Boolean))];
   const normalizedLanguageFilters = [...new Set(languageFilters.filter(Boolean))];
   const normalizedGenreFilters = [...new Set(genreFilters.filter(Boolean))];
+  const normalizedExcludeIds = [...new Set(excludeItemIds.filter(Boolean))];
 
   if (mediaType === 'movie' || mediaType === 'tv') {
     filters.push('media_type = ?');
@@ -638,6 +642,23 @@ async function readCachedCatalog(
     normalizedGenreFilters
       .filter((g) => g !== 'anime')
       .forEach((g) => params.push(`%${g}%`));
+  }
+
+  if (yearMin) {
+    filters.push('CAST(year AS INTEGER) >= ?');
+    params.push(Number(yearMin));
+  }
+
+  if (yearMax) {
+    filters.push('CAST(year AS INTEGER) <= ?');
+    params.push(Number(yearMax));
+  }
+
+  if (normalizedExcludeIds.length) {
+    filters.push(
+      `(media_type || '-' || CAST(tmdb_id AS TEXT)) NOT IN (${normalizedExcludeIds.map(() => '?').join(', ')})`
+    );
+    params.push(...normalizedExcludeIds);
   }
 
   const whereClause = filters.join(' AND ');

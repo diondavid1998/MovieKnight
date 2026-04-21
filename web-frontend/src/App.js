@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import './App.css';
 import { parsePercent, ratingEntriesForItem, buildApiErrorMessage, getRottenTomatoesType } from './utils';
+import streamscoutLogo from './logos/streamscout.png';
 
 const API_BASE = process.env.REACT_APP_API_BASE || 'https://streamscore-backend-production.up.railway.app';
 const AUTH_TOKEN_KEY = 'movieKnight.authToken';
@@ -605,6 +606,67 @@ const styles = {
     border: '1px solid rgba(233,69,96,0.48)',
     color: '#fff',
   },
+  // ── Rating chip color variants ─────────────────────────────────────────────
+  ratingChipImdb: { border: '1px solid rgba(245,197,24,0.5)', background: 'rgba(245,197,24,0.1)' },
+  ratingChipRT: { border: '1px solid rgba(250,70,70,0.45)', background: 'rgba(250,70,70,0.09)' },
+  ratingChipRTRotten: { border: '1px solid rgba(140,140,160,0.3)', background: 'rgba(140,140,160,0.06)' },
+  ratingChipMC: { border: '1px solid rgba(102,204,0,0.45)', background: 'rgba(102,204,0,0.09)' },
+  ratingChipMCMid: { border: '1px solid rgba(255,193,7,0.45)', background: 'rgba(255,193,7,0.08)' },
+  ratingChipMCLow: { border: '1px solid rgba(250,70,70,0.4)', background: 'rgba(250,70,70,0.08)' },
+  ratingChipTMDb: { border: '1px solid rgba(1,210,119,0.35)', background: 'rgba(1,210,119,0.08)' },
+  // ── Modal overlay ─────────────────────────────────────────────────────────
+  modalOverlay: {
+    position: 'fixed', top: 0, left: 0, right: 0, bottom: 0,
+    background: 'rgba(0,0,0,0.85)', backdropFilter: 'blur(12px)',
+    WebkitBackdropFilter: 'blur(12px)', zIndex: 1000,
+    display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '16px',
+    overflowY: 'auto',
+  },
+  modalCard: {
+    background: 'linear-gradient(160deg, rgba(16,19,28,0.99) 0%, rgba(12,14,21,0.99) 100%)',
+    borderRadius: 24, border: '1px solid rgba(255,255,255,0.09)',
+    boxShadow: '0 40px 100px rgba(0,0,0,0.7)',
+    maxWidth: 700, width: '100%', position: 'relative', overflow: 'hidden',
+    maxHeight: '90vh', overflowY: 'auto', margin: 'auto',
+  },
+  modalClose: {
+    position: 'absolute', top: 14, right: 14,
+    background: 'rgba(0,0,0,0.6)', border: '1px solid rgba(255,255,255,0.15)',
+    color: '#fff', borderRadius: 999, width: 36, height: 36, display: 'flex',
+    alignItems: 'center', justifyContent: 'center', cursor: 'pointer',
+    fontSize: 20, fontFamily: 'inherit', zIndex: 10, lineHeight: 1,
+  },
+  modalBanner: { width: '100%', height: 220, objectFit: 'cover', display: 'block' },
+  modalBody: { padding: '22px 28px 32px' },
+  modalPosterRow: { display: 'flex', gap: 20, alignItems: 'flex-start', marginBottom: 16 },
+  modalPoster: { width: 90, height: 136, borderRadius: 12, objectFit: 'cover', boxShadow: '0 8px 24px rgba(0,0,0,0.5)', flexShrink: 0 },
+  modalTitle: { fontSize: 24, fontWeight: 800, lineHeight: 1.15, letterSpacing: '-0.02em', marginBottom: 6 },
+  modalTagline: { fontSize: 13, color: '#6e7a93', fontStyle: 'italic', marginBottom: 10 },
+  castRow: { display: 'flex', gap: 12, overflowX: 'auto', padding: '4px 0', WebkitOverflowScrolling: 'touch', scrollbarWidth: 'none' },
+  castCard: { flexShrink: 0, width: 72, textAlign: 'center' },
+  castImg: { width: 56, height: 56, borderRadius: 999, objectFit: 'cover', background: 'rgba(255,255,255,0.06)', display: 'block', margin: '0 auto 5px', fontSize: 22, lineHeight: '56px' },
+  castName: { fontSize: 10, color: '#c0c8d8', fontWeight: 600, lineHeight: 1.3 },
+  castRole: { fontSize: 9, color: '#6e7a93', lineHeight: 1.2 },
+  // ── Settings tabs ─────────────────────────────────────────────────────────
+  settingsTabRow: { display: 'flex', gap: 0, marginBottom: 24, borderBottom: '1px solid rgba(255,255,255,0.08)', width: '100%' },
+  settingsTabBtn: { padding: '10px 18px', background: 'none', border: 'none', color: '#6e7a93', fontSize: 14, fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit', borderBottom: '2px solid transparent', marginBottom: -1, transition: 'color 0.18s' },
+  settingsTabBtnActive: { color: '#e94560', borderBottomColor: '#e94560' },
+  // ── Watched button on card ────────────────────────────────────────────────
+  watchedBtn: { position: 'absolute', top: 10, right: 10, background: 'rgba(0,0,0,0.6)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: 999, width: 30, height: 30, display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', fontSize: 14, fontFamily: 'inherit', color: '#8a93a8', transition: 'all 0.18s ease' },
+  watchedBtnActive: { background: 'rgba(1,210,119,0.22)', border: '1px solid rgba(1,210,119,0.45)', color: '#01d277' },
+  // ── Watchlist in settings ─────────────────────────────────────────────────
+  watchlistRow: { display: 'flex', gap: 12, alignItems: 'center', padding: '10px 0', borderBottom: '1px solid rgba(255,255,255,0.05)' },
+  watchlistPoster: { width: 40, height: 58, borderRadius: 8, objectFit: 'cover', background: 'rgba(255,255,255,0.05)', flexShrink: 0 },
+  // ── Profile avatar ────────────────────────────────────────────────────────
+  avatarCircle: { width: 80, height: 80, borderRadius: 999, background: 'rgba(233,69,96,0.15)', border: '2px solid rgba(233,69,96,0.3)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 32, color: '#e94560', overflow: 'hidden', flexShrink: 0 },
+  // ── Year range inputs ─────────────────────────────────────────────────────
+  yearRangeRow: { display: 'flex', gap: 10, alignItems: 'center' },
+  yearInput: { flex: 1, padding: '9px 12px', borderRadius: 10, border: '1px solid rgba(255,255,255,0.1)', background: 'rgba(255,255,255,0.05)', color: '#eef0f7', fontFamily: 'inherit', fontSize: 14, outline: 'none', boxSizing: 'border-box' },
+  // ── Clickable movie card ──────────────────────────────────────────────────
+  movieCardClickable: { cursor: 'pointer' },
+  // ── Filter panel (controlled, replaces <details>) ─────────────────────────
+  filterPanel: { width: '100%', borderRadius: 16, background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.06)', overflow: 'hidden' },
+  filterPanelHeader: { width: '100%', background: 'none', border: 'none', padding: '13px 16px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', color: '#c0c8d8', fontSize: 11, fontWeight: 800, letterSpacing: '0.12em', textTransform: 'uppercase', cursor: 'pointer', fontFamily: 'inherit' },
 };
 
 const streamingPlatforms = [
@@ -671,6 +733,25 @@ function App() {
   const [installPrompt, setInstallPrompt] = useState(null);
   const [showIosTip, setShowIosTip] = useState(false);
   const [platformSaveKey, setPlatformSaveKey] = useState(0);
+  // ── New feature state ──────────────────────────────────────────────────────
+  const [yearMin, setYearMin] = useState('');
+  const [yearMax, setYearMax] = useState('');
+  const [watchedIds, setWatchedIds] = useState(new Set());
+  const [hideWatched, setHideWatched] = useState(false);
+  const [selectedMovie, setSelectedMovie] = useState(null);
+  const [movieDetails, setMovieDetails] = useState(null);
+  const [loadingDetails, setLoadingDetails] = useState(false);
+  const [settingsTab, setSettingsTab] = useState('services');
+  const [accountData, setAccountData] = useState({ username: '', email: '', profilePic: null });
+  const [editUsername, setEditUsername] = useState('');
+  const [editEmail, setEditEmail] = useState('');
+  const [editPassword, setEditPassword] = useState('');
+  const [watchlistItems, setWatchlistItems] = useState([]);
+  const [resetStep, setResetStep] = useState(0); // 0: off, 1: email, 2: code, 3: done
+  const [resetEmail, setResetEmail] = useState('');
+  const [resetCode, setResetCode] = useState('');
+  const [resetNewPass, setResetNewPass] = useState('');
+  const [openFilters, setOpenFilters] = useState({ service: false, language: false, genre: false, year: false });
   const abortRef = useRef(null);
 
   // buildApiErrorMessage imported from utils.js
@@ -695,6 +776,17 @@ function App() {
     setServiceFilters([]);
     setLanguageFilters([]);
     setCatalogPage(1);
+    setYearMin('');
+    setYearMax('');
+    setWatchedIds(new Set());
+    setHideWatched(false);
+    setSelectedMovie(null);
+    setMovieDetails(null);
+    setSettingsTab('services');
+    setAccountData({ username: '', email: '', profilePic: null });
+    setWatchlistItems([]);
+    setResetStep(0);
+    setOpenFilters({ service: false, language: false, genre: false, year: false });
   };
 
   const logout = (message = 'You have been signed out.') => {
@@ -763,6 +855,176 @@ function App() {
     return true;
   };
 
+  const loadWatched = useCallback(async () => {
+    if (!token) return;
+    try {
+      const response = await fetch(`${API_BASE}/watched`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (!response.ok) return;
+      const data = await parseResponseBody(response);
+      const items = Array.isArray(data.items) ? data.items : [];
+      setWatchedIds(new Set(items.map((item) => item.item_id)));
+      setWatchlistItems(items);
+    } catch { /* silent */ }
+  }, [token]); // eslint-disable-line
+
+  const toggleWatched = async (movie) => {
+    const itemId = movie.id;
+    const isWatched = watchedIds.has(itemId);
+    if (isWatched) {
+      try {
+        await apiFetch(`/watched/${encodeURIComponent(itemId)}`, { method: 'DELETE' });
+        setWatchedIds((prev) => { const next = new Set(prev); next.delete(itemId); return next; });
+        setWatchlistItems((prev) => prev.filter((item) => item.item_id !== itemId));
+      } catch { /* silent */ }
+    } else {
+      try {
+        await apiFetch('/watched', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ itemId, mediaType: movie.mediaType, title: movie.title, posterUrl: movie.posterUrl }),
+        });
+        setWatchedIds((prev) => new Set([...prev, itemId]));
+        setWatchlistItems((prev) => [{ item_id: itemId, media_type: movie.mediaType, title: movie.title, poster_url: movie.posterUrl, watched_at: new Date().toISOString() }, ...prev]);
+      } catch { /* silent */ }
+    }
+  };
+
+  const fetchMovieDetails = async (movie) => {
+    setSelectedMovie(movie);
+    setMovieDetails(null);
+    setLoadingDetails(true);
+    try {
+      const response = await apiFetch(`/titles/${movie.mediaType}/${movie.tmdbId}/details`);
+      if (response.ok) {
+        const data = await parseResponseBody(response);
+        setMovieDetails(data);
+      }
+    } catch { /* silent */ }
+    setLoadingDetails(false);
+  };
+
+  const fetchAccount = async () => {
+    try {
+      const response = await apiFetch('/account');
+      if (!response.ok) return;
+      const data = await parseResponseBody(response);
+      setAccountData({ username: data.username || '', email: data.email || '', profilePic: data.profilePic || null });
+      setEditUsername(data.username || '');
+      setEditEmail(data.email || '');
+    } catch { /* silent */ }
+  };
+
+  const handleUpdateAccount = async (e) => {
+    e.preventDefault();
+    clearFeedback();
+    const updates = {};
+    if (editUsername && editUsername !== accountData.username) updates.username = editUsername;
+    if (editEmail !== accountData.email) updates.email = editEmail;
+    if (editPassword) updates.password = editPassword;
+    if (!Object.keys(updates).length) { setInfo('Nothing to update.'); return; }
+    try {
+      const response = await apiFetch('/account', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(updates),
+      });
+      const data = await parseResponseBody(response);
+      if (!response.ok) { setError(buildApiErrorMessage(data, 'Update failed.')); return; }
+      if (data.token) {
+        localStorage.setItem(AUTH_TOKEN_KEY, data.token);
+        setToken(data.token);
+        const newUsername = updates.username || username;
+        localStorage.setItem(AUTH_USERNAME_KEY, newUsername);
+        setUsername(newUsername);
+      }
+      setAccountData((prev) => ({ ...prev, ...(updates.username ? { username: updates.username } : {}), ...(updates.email !== undefined ? { email: updates.email } : {}) }));
+      setEditPassword('');
+      setInfo('Account updated.');
+    } catch (err) { setError(`Network error: ${err.message}`); }
+  };
+
+  const handleProfilePicUpload = (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const canvas = document.createElement('canvas');
+    canvas.width = 256; canvas.height = 256;
+    const ctx = canvas.getContext('2d');
+    const img = new Image();
+    img.onload = async () => {
+      const size = Math.min(img.width, img.height);
+      const sx = (img.width - size) / 2;
+      const sy = (img.height - size) / 2;
+      ctx.drawImage(img, sx, sy, size, size, 0, 0, 256, 256);
+      const base64 = canvas.toDataURL('image/jpeg', 0.85);
+      try {
+        const response = await apiFetch('/account', {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ profilePic: base64 }),
+        });
+        if (response.ok) {
+          setAccountData((prev) => ({ ...prev, profilePic: base64 }));
+          setInfo('Profile picture updated.');
+        }
+      } catch { /* silent */ }
+    };
+    img.src = URL.createObjectURL(file);
+  };
+
+  const handleForgotPassword = async (e) => {
+    e.preventDefault();
+    clearFeedback();
+    try {
+      const response = await fetch(`${API_BASE}/auth/forgot-password`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: resetEmail }),
+      });
+      const data = await parseResponseBody(response);
+      if (!response.ok) { setError(buildApiErrorMessage(data, 'Failed to send reset code.')); return; }
+      setResetStep(2);
+      setInfo('If that email is registered, a 6-digit code has been sent.');
+    } catch (err) { setError(`Network error: ${err.message}`); }
+  };
+
+  const handleResetPassword = async (e) => {
+    e.preventDefault();
+    clearFeedback();
+    try {
+      const response = await fetch(`${API_BASE}/auth/reset-password`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: resetEmail, code: resetCode, newPassword: resetNewPass }),
+      });
+      const data = await parseResponseBody(response);
+      if (!response.ok) { setError(buildApiErrorMessage(data, 'Reset failed.')); return; }
+      setResetStep(0);
+      setInfo('Password reset. Sign in with your new password.');
+    } catch (err) { setError(`Network error: ${err.message}`); }
+  };
+
+  const getRatingChipStyle = (key, value) => {
+    if (key === 'imdb') return styles.ratingChipImdb;
+    if (key === 'tmdb') return styles.ratingChipTMDb;
+    if (key === 'rottenTomatoes') {
+      const pct = parsePercent(value);
+      return (pct !== null && pct >= 60) ? styles.ratingChipRT : styles.ratingChipRTRotten;
+    }
+    if (key === 'metacritic') {
+      const num = parseInt(value);
+      if (!isNaN(num)) {
+        if (num >= 61) return styles.ratingChipMC;
+        if (num >= 40) return styles.ratingChipMCMid;
+        return styles.ratingChipMCLow;
+      }
+    }
+    return {};
+  };
+
+  const toggleFilterPanel = (key) => setOpenFilters((prev) => ({ ...prev, [key]: !prev[key] }));
+
   const fetchMovies = useCallback(async () => {
     if (isBypassMode) {
       setMovies([]);
@@ -803,6 +1065,10 @@ function App() {
         query.set('genreFilters', genreFilters.join(','));
       }
 
+      if (yearMin) query.set('yearMin', yearMin);
+      if (yearMax) query.set('yearMax', yearMax);
+      if (hideWatched) query.set('hideWatched', 'true');
+
       const response = await apiFetch(`/movies?${query.toString()}`, {
         signal: controller.signal,
         headers: { 'Content-Type': 'application/json' },
@@ -819,7 +1085,7 @@ function App() {
       setCatalogMeta(data.meta || null);
       if (!items.length) {
         setInfo(
-          serviceFilters.length || languageFilters.length
+          serviceFilters.length || languageFilters.length || genreFilters.length || yearMin || yearMax
             ? 'No titles matched the current catalog filters.'
             : 'No titles were returned for the platforms currently selected.'
         );
@@ -832,7 +1098,7 @@ function App() {
     } finally {
       setLoadingMovies(false);
     }
-  }, [isBypassMode, mediaTypeFilter, sortBy, catalogPage, serviceFilters, languageFilters, genreFilters, token, platformSaveKey]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [isBypassMode, mediaTypeFilter, sortBy, catalogPage, serviceFilters, languageFilters, genreFilters, yearMin, yearMax, hideWatched, token, platformSaveKey]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const formatMediaType = (value) => {
     if (value === 'documentary') {
@@ -1014,6 +1280,20 @@ function App() {
     }
   }, [page, fetchMovies]);
 
+  // Load watched list when on catalog page
+  useEffect(() => {
+    if (page === 'movies' && token) {
+      loadWatched();
+    }
+  }, [page, token]); // eslint-disable-line
+
+  // Load account data + watchlist when switching settings tabs
+  useEffect(() => {
+    if (!showSettings) return;
+    if (settingsTab === 'profile') fetchAccount();
+    if (settingsTab === 'watchlist') loadWatched();
+  }, [settingsTab, showSettings]); // eslint-disable-line
+
   // Auto-retry when the backend is still warming up the catalog cache
   useEffect(() => {
     if (!catalogMeta?.refreshing || page !== 'movies' || loadingMovies) return;
@@ -1070,7 +1350,11 @@ function App() {
       const response = await fetch(`${API_BASE}/${authMode}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ username: cleanUsername, password }),
+        body: JSON.stringify({
+          username: cleanUsername,
+          password,
+          ...(authMode === 'register' && resetEmail ? { email: resetEmail } : {}),
+        }),
       });
       const data = await parseResponseBody(response);
 
@@ -1203,9 +1487,9 @@ function App() {
       <div style={styles.container} className="mk-container">
         <div style={{ ...styles.card, ...styles.authCard }} className="mk-card mk-card-auth">
           <div style={styles.authMeta}>
-            <div style={styles.eyebrow}>StreamScore</div>
+            <img src={streamscoutLogo} alt="StreamScout" style={{ width: 56, height: 56, borderRadius: 14, marginBottom: 12 }} />
             <h1 style={styles.title}>Restoring session</h1>
-            <p style={styles.subtitle}>Checking your saved sign-in state and loading your account.</p>
+            <p style={styles.subtitle}>Checking your saved sign-in state…</p>
           </div>
         </div>
       </div>
@@ -1215,66 +1499,129 @@ function App() {
   if (page === 'login') {
     const isRegister = authMode === 'register';
 
+    // Forgot password flow
+    if (resetStep === 1) {
+      return (
+        <div style={styles.container} className="mk-container">
+          <div style={styles.shell} className="mk-shell">
+            <div style={{ ...styles.card, ...styles.authCard }} className="mk-card mk-card-auth fade-in">
+              <div style={styles.authMeta}>
+                <img src={streamscoutLogo} alt="StreamScout" style={{ width: 48, height: 48, borderRadius: 12, marginBottom: 10 }} />
+                <h1 style={styles.title}>Reset Password</h1>
+                <p style={styles.subtitle}>Enter the email address on your account. We'll send a 6-digit code.</p>
+              </div>
+              <form onSubmit={handleForgotPassword} style={styles.form}>
+                <input
+                  style={styles.input} className="mk-input" type="email" placeholder="Email address"
+                  value={resetEmail} onChange={(e) => setResetEmail(e.target.value)} autoComplete="email"
+                />
+                <button style={styles.button} className="btn-tap" type="submit">Send Reset Code</button>
+              </form>
+              <div style={styles.authSwitch}>
+                <button style={styles.inlineButton} type="button" onClick={() => { setResetStep(0); clearFeedback(); }}>← Back to Sign In</button>
+              </div>
+              {renderFeedback()}
+            </div>
+          </div>
+        </div>
+      );
+    }
+
+    if (resetStep === 2) {
+      return (
+        <div style={styles.container} className="mk-container">
+          <div style={styles.shell} className="mk-shell">
+            <div style={{ ...styles.card, ...styles.authCard }} className="mk-card mk-card-auth fade-in">
+              <div style={styles.authMeta}>
+                <img src={streamscoutLogo} alt="StreamScout" style={{ width: 48, height: 48, borderRadius: 12, marginBottom: 10 }} />
+                <h1 style={styles.title}>Enter Code</h1>
+                <p style={styles.subtitle}>Enter the 6-digit code sent to <strong>{resetEmail}</strong> and choose a new password.</p>
+              </div>
+              <form onSubmit={handleResetPassword} style={styles.form}>
+                <input
+                  style={styles.input} className="mk-input" placeholder="6-digit code"
+                  value={resetCode} onChange={(e) => setResetCode(e.target.value)} autoComplete="one-time-code"
+                  inputMode="numeric"
+                />
+                <input
+                  style={styles.input} className="mk-input" type="password" placeholder="New password"
+                  value={resetNewPass} onChange={(e) => setResetNewPass(e.target.value)} autoComplete="new-password"
+                />
+                <button style={styles.button} className="btn-tap" type="submit">Reset Password</button>
+              </form>
+              <div style={styles.authSwitch}>
+                <button style={styles.inlineButton} type="button" onClick={() => { setResetStep(1); clearFeedback(); }}>← Re-send code</button>
+              </div>
+              {renderFeedback()}
+            </div>
+          </div>
+        </div>
+      );
+    }
+
     return (
       <div style={styles.container} className="mk-container">
         <div style={styles.shell} className="mk-shell">
           <div style={{ ...styles.card, ...styles.authCard }} className="mk-card mk-card-auth fade-in">
             <div style={styles.authMeta}>
-              <div style={styles.eyebrow}>🎬 StreamScore</div>
+              <img src={streamscoutLogo} alt="StreamScout" style={{ width: 56, height: 56, borderRadius: 14, marginBottom: 12 }} />
+              <div style={styles.eyebrow}>StreamScout</div>
               <h1 style={styles.title}>{isRegister ? 'Create your account' : 'Sign in'}</h1>
               <p style={styles.subtitle}>
                 {isRegister
-                  ? 'Register once, save your streaming services, and pull movie picks from your backend.'
-                  : 'Use your existing account to manage platforms and fetch movie recommendations.'}
+                  ? 'Register once, save your streaming services, and get personalised picks.'
+                  : 'Use your account to manage platforms and browse the live catalog.'}
               </p>
             </div>
 
             <form onSubmit={handleAuth} style={styles.form}>
               <input
-                style={styles.input}
-                className="mk-input"
-                placeholder="Username"
-                value={username}
-                onChange={(event) => setUsername(event.target.value)}
-                autoComplete="username"
+                style={styles.input} className="mk-input" placeholder="Username"
+                value={username} onChange={(event) => setUsername(event.target.value)} autoComplete="username"
               />
+              {isRegister && (
+                <input
+                  style={styles.input} className="mk-input" type="email" placeholder="Email (optional — for password reset)"
+                  value={resetEmail} onChange={(e) => setResetEmail(e.target.value)} autoComplete="email"
+                />
+              )}
               <input
-                style={styles.input}
-                className="mk-input"
-                placeholder="Password"
-                type="password"
-                value={password}
-                onChange={(event) => setPassword(event.target.value)}
+                style={styles.input} className="mk-input" placeholder="Password" type="password"
+                value={password} onChange={(event) => setPassword(event.target.value)}
                 autoComplete={isRegister ? 'new-password' : 'current-password'}
               />
               <button
                 style={{ ...styles.button, ...(loadingAuth ? styles.buttonLoading : {}) }}
-                className="btn-tap"
-                type="submit"
-                disabled={loadingAuth}
+                className="btn-tap" type="submit" disabled={loadingAuth}
               >
-                {loadingAuth ? 'Working...' : isRegister ? 'Create Account' : 'Sign In'}
+                {loadingAuth ? 'Working…' : isRegister ? 'Create Account' : 'Sign In'}
               </button>
               {!isRegister ? (
                 <button
                   style={{ ...styles.button, ...styles.buttonSecondary }}
-                  className="btn-tap"
-                  onClick={handleBypassLogin}
-                  type="button"
+                  className="btn-tap" onClick={handleBypassLogin} type="button"
                 >
                   Bypass for Testing
                 </button>
               ) : null}
             </form>
 
+            {!isRegister && (
+              <div style={{ marginTop: 12, textAlign: 'center' }}>
+                <button
+                  style={styles.inlineButton} type="button"
+                  onClick={() => { clearFeedback(); setResetStep(1); }}
+                >
+                  Forgot password?
+                </button>
+              </div>
+            )}
+
             <div style={styles.authSwitch}>
               {isRegister ? 'Already have an account? ' : 'Need an account? '}
               <button
                 style={styles.inlineButton}
-                onClick={() => {
-                  clearFeedback();
-                  setAuthMode(isRegister ? 'login' : 'register');
-                }}
+                onClick={() => { clearFeedback(); setAuthMode(isRegister ? 'login' : 'register'); }}
                 type="button"
               >
                 {isRegister ? 'Sign in instead' : 'Create one'}
@@ -1289,88 +1636,144 @@ function App() {
   }
 
   if (showSettings || page === 'platforms') {
+    const isFirstSetup = page === 'platforms' && !showSettings;
     return (
       <div style={styles.container} className="mk-container">
         <div style={styles.shell} className="mk-shell">
           <div style={styles.card} className="mk-card fade-in">
             <div style={styles.headerRow} className="header-row-wrap">
               <div style={styles.headingGroup}>
-                <div style={styles.eyebrow}>Streaming Setup</div>
-                <h1 style={styles.title}>{showSettings ? 'Edit your services' : 'Choose your streaming platforms'}</h1>
-                <p style={styles.subtitle}>
-                  Signed in as {username || 'your account'}. Select every service you want StreamScore to search.
-                </p>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 8 }}>
+                  <img src={streamscoutLogo} alt="StreamScout" style={{ width: 36, height: 36, borderRadius: 9 }} />
+                  <div style={styles.eyebrow}>StreamScout</div>
+                </div>
+                <h1 style={styles.title}>{isFirstSetup ? 'Choose your platforms' : 'Settings'}</h1>
+                <p style={styles.subtitle}>Signed in as <strong>{username || 'your account'}</strong></p>
               </div>
               <div style={styles.topActions} className="top-actions-wrap">
-                {page === 'platforms' ? null : (
-                  <button
-                    style={{ ...styles.button, ...styles.buttonSecondary, ...styles.buttonSmall }}
-                    className="btn-tap"
-                    onClick={() => {
-                      setShowSettings(false);
-                      setPage('movies');
-                      clearFeedback();
-                    }}
-                    type="button"
-                  >
-                    ← Back
-                  </button>
+                {!isFirstSetup && (
+                  <button style={{ ...styles.button, ...styles.buttonSecondary, ...styles.buttonSmall }} className="btn-tap"
+                    onClick={() => { setShowSettings(false); setPage('movies'); clearFeedback(); }} type="button">← Back</button>
                 )}
-                <button
-                  style={{ ...styles.button, ...styles.buttonSecondary, ...styles.buttonSmall }}
-                  className="btn-tap"
-                  onClick={() => logout()}
-                  type="button"
-                >
-                  Logout
-                </button>
+                <button style={{ ...styles.button, ...styles.buttonSecondary, ...styles.buttonSmall }} className="btn-tap"
+                  onClick={() => logout()} type="button">Logout</button>
               </div>
             </div>
 
-            <div style={styles.dropdownGrid} className="dropdown-grid-wrap">
-              <details style={styles.dropdownPanel} open>
-                <summary style={styles.dropdownSummary}>
-                  <span>Streaming Services</span>
-                  <span style={styles.dropdownMeta}>{selected.length} selected</span>
-                </summary>
-                <div style={styles.dropdownBody}>{renderPlatformSelector()}</div>
-              </details>
+            {!isFirstSetup && (
+              <div style={styles.settingsTabRow}>
+                {[['services', '⚙ Services'], ['profile', '👤 Profile'], ['watchlist', '✓ Watchlist']].map(([tab, label]) => (
+                  <button key={tab} type="button"
+                    style={{ ...styles.settingsTabBtn, ...(settingsTab === tab ? styles.settingsTabBtnActive : {}) }}
+                    onClick={() => { setSettingsTab(tab); clearFeedback(); }}>{label}</button>
+                ))}
+              </div>
+            )}
 
-              <details style={styles.dropdownPanel} open>
-                <summary style={styles.dropdownSummary}>
-                  <span>Languages</span>
-                  <span style={styles.dropdownMeta}>{languages.length} selected</span>
-                </summary>
-                <div style={styles.dropdownBody}>
-                  <div style={styles.serviceFilterRow}>
-                    {languageOptions.map((language) => {
-                      const isActive = languages.includes(language.key);
+            {/* ── Services Tab ── */}
+            {(isFirstSetup || settingsTab === 'services') && (
+              <>
+                <div style={styles.dropdownGrid} className="dropdown-grid-wrap">
+                  <details style={styles.dropdownPanel} open>
+                    <summary style={styles.dropdownSummary}>
+                      <span>Streaming Services</span>
+                      <span style={styles.dropdownMeta}>{selected.length} selected</span>
+                    </summary>
+                    <div style={styles.dropdownBody}>{renderPlatformSelector()}</div>
+                  </details>
+                  <details style={styles.dropdownPanel} open>
+                    <summary style={styles.dropdownSummary}>
+                      <span>Languages</span>
+                      <span style={styles.dropdownMeta}>{languages.length} selected</span>
+                    </summary>
+                    <div style={styles.dropdownBody}>
+                      <div style={styles.serviceFilterRow}>
+                        {languageOptions.map((language) => {
+                          const isActive = languages.includes(language.key);
+                          return (
+                            <button key={language.key} type="button" onClick={() => toggleLanguage(language.key)}
+                              className="btn-tap"
+                              style={{ ...styles.serviceFilterButton, ...(isActive ? styles.serviceFilterButtonActive : {}) }}>
+                              <span>{language.name}</span>
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  </details>
+                </div>
+                <div style={styles.sectionActions}>
+                  <button style={styles.button} className="btn-tap" onClick={handleSavePlatforms} type="button">
+                    {isFirstSetup ? 'Save and Continue →' : 'Save Changes'}
+                  </button>
+                </div>
+              </>
+            )}
 
-                      return (
-                        <button
-                          key={language.key}
-                          type="button"
-                          onClick={() => toggleLanguage(language.key)}
-                          className="btn-tap"
-                          style={{
-                            ...styles.serviceFilterButton,
-                            ...(isActive ? styles.serviceFilterButtonActive : {}),
-                          }}
-                        >
-                          <span>{language.name}</span>
-                        </button>
-                      );
-                    })}
+            {/* ── Profile Tab ── */}
+            {!isFirstSetup && settingsTab === 'profile' && (
+              <form onSubmit={handleUpdateAccount} style={{ width: '100%' }}>
+                {/* Avatar */}
+                <div style={{ display: 'flex', alignItems: 'center', gap: 16, marginBottom: 24 }}>
+                  <div style={styles.avatarCircle}>
+                    {accountData.profilePic
+                      ? <img src={accountData.profilePic} alt="avatar" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                      : <span>{(accountData.username || username || '?')[0].toUpperCase()}</span>}
+                  </div>
+                  <div>
+                    <div style={{ color: '#c0c8d8', fontWeight: 700, marginBottom: 6 }}>{accountData.username || username}</div>
+                    <label style={{ ...styles.button, ...styles.buttonSecondary, ...styles.buttonSmall, display: 'inline-block', cursor: 'pointer' }}>
+                      Upload Photo
+                      <input type="file" accept="image/*" style={{ display: 'none' }} onChange={handleProfilePicUpload} />
+                    </label>
                   </div>
                 </div>
-              </details>
-            </div>
+                <div style={styles.sectionBlock}>
+                  <div style={styles.sectionLabel}>Username</div>
+                  <input style={styles.input} className="mk-input" placeholder="New username"
+                    value={editUsername} onChange={(e) => setEditUsername(e.target.value)} autoComplete="username" />
+                </div>
+                <div style={styles.sectionBlock}>
+                  <div style={styles.sectionLabel}>Email</div>
+                  <input style={styles.input} className="mk-input" type="email" placeholder="Email address (for password reset)"
+                    value={editEmail} onChange={(e) => setEditEmail(e.target.value)} autoComplete="email" />
+                </div>
+                <div style={styles.sectionBlock}>
+                  <div style={styles.sectionLabel}>New Password</div>
+                  <input style={styles.input} className="mk-input" type="password" placeholder="Leave blank to keep current"
+                    value={editPassword} onChange={(e) => setEditPassword(e.target.value)} autoComplete="new-password" />
+                </div>
+                <div style={styles.sectionActions}>
+                  <button style={styles.button} className="btn-tap" type="submit">Save Profile</button>
+                </div>
+              </form>
+            )}
 
-            <div style={styles.sectionActions}>
-              <button style={styles.button} className="btn-tap" onClick={handleSavePlatforms} type="button">
-                {showSettings ? 'Save Changes' : 'Save and Continue →'}
-              </button>
-            </div>
+            {/* ── Watchlist Tab ── */}
+            {!isFirstSetup && settingsTab === 'watchlist' && (
+              <div style={{ width: '100%' }}>
+                {watchlistItems.length === 0 ? (
+                  <p style={styles.emptyState}>You haven't marked anything as watched yet.</p>
+                ) : (
+                  watchlistItems.map((item) => (
+                    <div key={item.item_id} style={styles.watchlistRow}>
+                      {item.poster_url
+                        ? <img src={item.poster_url} alt={item.title} style={styles.watchlistPoster} />
+                        : <div style={{ ...styles.watchlistPoster, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 18 }}>🎬</div>}
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <div style={{ fontWeight: 700, fontSize: 14, color: '#eef0f7', marginBottom: 2 }}>{item.title || item.item_id}</div>
+                        <div style={{ fontSize: 11, color: '#6e7a93', textTransform: 'uppercase', letterSpacing: '0.06em' }}>{item.media_type || ''}</div>
+                      </div>
+                      <button type="button"
+                        style={{ background: 'none', border: 'none', color: '#e94560', cursor: 'pointer', fontFamily: 'inherit', fontSize: 13, fontWeight: 600, padding: '6px 10px' }}
+                        onClick={() => toggleWatched({ id: item.item_id, mediaType: item.media_type, title: item.title, posterUrl: item.poster_url })}>
+                        Remove
+                      </button>
+                    </div>
+                  ))
+                )}
+              </div>
+            )}
 
             {renderFeedback()}
           </div>
@@ -1380,80 +1783,63 @@ function App() {
   }
 
   if (page === 'movies') {
+    const renderFilterPanel = (key, label, metaText, children) => (
+      <div style={styles.filterPanel} key={key}>
+        <button type="button" style={styles.filterPanelHeader} onClick={() => toggleFilterPanel(key)}>
+          <span>{label}</span>
+          <span style={{ ...styles.dropdownMeta, display: 'flex', alignItems: 'center', gap: 6 }}>
+            {metaText}
+            <span style={{ fontSize: 10 }}>{openFilters[key] ? '▲' : '▼'}</span>
+          </span>
+        </button>
+        {openFilters[key] && <div style={styles.dropdownBody}>{children}</div>}
+      </div>
+    );
+
     return (
       <div style={styles.container} className="mk-container">
         <div style={styles.shell} className="mk-shell">
           <div style={styles.card} className="mk-card fade-in">
             <div style={styles.headerRow} className="header-row-wrap">
               <div style={styles.headingGroup}>
-                <div style={styles.eyebrow}>🎬 Catalog</div>
-                <h1 style={styles.title}>StreamScore</h1>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 4 }}>
+                  <img src={streamscoutLogo} alt="StreamScout" style={{ width: 32, height: 32, borderRadius: 8 }} />
+                  <div style={styles.eyebrow}>🎬 Catalog</div>
+                </div>
+                <h1 style={styles.title}>StreamScout</h1>
                 <p style={styles.subtitle}>Live movies &amp; TV from your selected streaming services.</p>
               </div>
               <div style={styles.topActions} className="top-actions-wrap">
                 <button
-                  style={{
-                    ...styles.button,
-                    ...styles.buttonSmall,
-                    ...(loadingMovies ? styles.buttonLoading : {}),
-                  }}
-                  className="btn-tap"
-                  onClick={fetchMovies}
-                  disabled={loadingMovies}
-                  type="button"
-                >
-                  {loadingMovies ? 'Loading...' : 'Refresh'}
+                  style={{ ...styles.button, ...styles.buttonSmall, ...(loadingMovies ? styles.buttonLoading : {}) }}
+                  className="btn-tap" onClick={fetchMovies} disabled={loadingMovies} type="button">
+                  {loadingMovies ? 'Loading…' : 'Refresh'}
                 </button>
                 <button
                   style={{ ...styles.button, ...styles.buttonSecondary, ...styles.buttonSmall }}
                   className="btn-tap"
-                  onClick={() => {
-                    clearFeedback();
-                    setShowSettings(true);
-                  }}
-                  type="button"
-                >
-                  ⚙ Settings
-                </button>
+                  onClick={() => { clearFeedback(); setShowSettings(true); setSettingsTab('services'); }}
+                  type="button">⚙ Settings</button>
                 {installPrompt && (
-                  <button
-                    style={{ ...styles.button, ...styles.buttonSmall }}
-                    className="btn-tap"
-                    onClick={handleInstall}
-                    type="button"
-                  >
-                    ⬇ Install App
-                  </button>
+                  <button style={{ ...styles.button, ...styles.buttonSmall }} className="btn-tap" onClick={handleInstall} type="button">⬇ Install</button>
                 )}
-                <button
-                  style={{ ...styles.button, ...styles.buttonSecondary, ...styles.buttonSmall }}
-                  className="btn-tap"
-                  onClick={() => logout()}
-                  type="button"
-                >
-                  Logout
-                </button>
+                <button style={{ ...styles.button, ...styles.buttonSecondary, ...styles.buttonSmall }} className="btn-tap" onClick={() => logout()} type="button">Logout</button>
               </div>
             </div>
 
             {showIosTip && (
               <div style={{ ...styles.info, marginBottom: 16, display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
-                <span>📲 To install on iPhone: tap the <strong>Share</strong> button in Safari, then <strong>"Add to Home Screen"</strong>.</span>
-                <button
-                  type="button"
-                  onClick={() => setShowIosTip(false)}
-                  style={{ ...styles.inlineButton, fontSize: 18, lineHeight: 1, flexShrink: 0 }}
-                  aria-label="Dismiss"
-                >
-                  ✕
-                </button>
+                <span>📲 To install on iPhone: tap <strong>Share</strong> in Safari, then <strong>"Add to Home Screen"</strong>.</span>
+                <button type="button" onClick={() => setShowIosTip(false)}
+                  style={{ ...styles.inlineButton, fontSize: 18, lineHeight: 1, flexShrink: 0 }} aria-label="Dismiss">✕</button>
               </div>
             )}
 
             <div style={styles.controlRow} className="control-row-wrap">
               <div style={styles.controlGroup}>
                 <span style={styles.controlLabel}>Type</span>
-                <select style={styles.select} className="mk-select" value={mediaTypeFilter} onChange={(event) => { setMediaTypeFilter(event.target.value); setCatalogPage(1); }}>
+                <select style={styles.select} className="mk-select" value={mediaTypeFilter}
+                  onChange={(e) => { setMediaTypeFilter(e.target.value); setCatalogPage(1); }}>
                   <option value="tv">TV Shows</option>
                   <option value="movie">Movies</option>
                   <option value="all">Movies + TV</option>
@@ -1462,125 +1848,117 @@ function App() {
               </div>
               <div style={styles.controlGroup}>
                 <span style={styles.controlLabel}>Sort By</span>
-                <select style={styles.select} className="mk-select" value={sortBy} onChange={(event) => { setSortBy(event.target.value); setCatalogPage(1); }}>
+                <select style={styles.select} className="mk-select" value={sortBy}
+                  onChange={(e) => { setSortBy(e.target.value); setCatalogPage(1); }}>
                   <option value="popularity">Popularity</option>
                   <option value="tmdb">TMDb Rating</option>
                   <option value="imdb">IMDb Rating</option>
                   <option value="rotten_tomatoes">Rotten Tomatoes</option>
                   <option value="metacritic">Metacritic</option>
                   <option value="release_date">Release Date</option>
-                  <option value="title">Title</option>
+                  <option value="title">Title A–Z</option>
                 </select>
               </div>
             </div>
 
+            {/* Hide Watched toggle */}
+            {watchedIds.size > 0 && (
+              <div style={{ width: '100%', marginBottom: 12, display: 'flex', alignItems: 'center', gap: 10 }}>
+                <button type="button"
+                  style={{ ...styles.serviceFilterButton, ...(hideWatched ? { background: 'rgba(1,210,119,0.15)', border: '1px solid rgba(1,210,119,0.35)', color: '#01d277' } : {}) }}
+                  onClick={() => { setHideWatched((v) => !v); setCatalogPage(1); }}>
+                  {hideWatched ? '✓ Hiding watched' : '○ Show all'}
+                </button>
+                <span style={{ color: '#6e7a93', fontSize: 12 }}>{watchedIds.size} watched</span>
+              </div>
+            )}
+
             <div style={styles.dropdownGrid} className="dropdown-grid-wrap">
-              <details style={styles.dropdownPanel}>
-                <summary style={styles.dropdownSummary}>
-                  <span>Service Filter</span>
-                  <span style={styles.dropdownMeta}>{serviceFilters.length || 'All'}</span>
-                </summary>
-                <div style={styles.dropdownBody}>
-                  <div style={styles.serviceFilterRow}>
-                    {streamingPlatforms
-                      .filter((platform) => selected.includes(platform.key))
-                      .map((platform) => {
-                        const isActive = serviceFilters.includes(platform.key);
-
-                        return (
-                          <button
-                            key={platform.key}
-                            type="button"
-                            onClick={() => toggleServiceFilter(platform.key)}
-                            className="btn-tap"
-                            style={{
-                              ...styles.serviceFilterButton,
-                              ...(isActive ? styles.serviceFilterButtonActive : {}),
-                            }}
-                          >
-                            <img src={platform.logo} alt={platform.name} style={styles.serviceLogoTiny} />
-                            <span>{platform.name}</span>
-                          </button>
-                        );
-                      })}
-                  </div>
+              {renderFilterPanel('service', 'Service Filter',
+                <span style={serviceFilters.length ? { color: '#ff8fa3' } : {}}>{serviceFilters.length || 'All'}</span>,
+                <div style={styles.serviceFilterRow}>
+                  {streamingPlatforms.filter((p) => selected.includes(p.key)).map((platform) => {
+                    const isActive = serviceFilters.includes(platform.key);
+                    return (
+                      <button key={platform.key} type="button" onClick={() => toggleServiceFilter(platform.key)}
+                        className="btn-tap"
+                        style={{ ...styles.serviceFilterButton, ...(isActive ? styles.serviceFilterButtonActive : {}) }}>
+                        <img src={platform.logo} alt={platform.name} style={styles.serviceLogoTiny} />
+                        <span>{platform.name}</span>
+                      </button>
+                    );
+                  })}
                 </div>
-              </details>
+              )}
 
-              <details style={styles.dropdownPanel}>
-                <summary style={styles.dropdownSummary}>
-                  <span>Language Filter</span>
-                  <span style={styles.dropdownMeta}>{languageFilters.length || 'All'}</span>
-                </summary>
-                <div style={styles.dropdownBody}>
-                  <div style={styles.serviceFilterRow}>
-                    {languageOptions
-                      .filter((language) => languages.includes(language.key))
-                      .map((language) => {
-                        const isActive = languageFilters.includes(language.key);
-
-                        return (
-                          <button
-                            key={language.key}
-                            type="button"
-                            onClick={() => toggleLanguageFilter(language.key)}
-                            className="btn-tap"
-                            style={{
-                              ...styles.serviceFilterButton,
-                              ...(isActive ? styles.serviceFilterButtonActive : {}),
-                            }}
-                          >
-                            <span>{language.name}</span>
-                          </button>
-                        );
-                      })}
-                  </div>
+              {renderFilterPanel('language', 'Language Filter',
+                <span style={languageFilters.length ? { color: '#ff8fa3' } : {}}>{languageFilters.length || 'All'}</span>,
+                <div style={styles.serviceFilterRow}>
+                  {/* Show all languages if user has none configured, otherwise show configured languages */}
+                  {(languages.length ? languageOptions.filter((l) => languages.includes(l.key)) : languageOptions).map((language) => {
+                    const isActive = languageFilters.includes(language.key);
+                    return (
+                      <button key={language.key} type="button" onClick={() => toggleLanguageFilter(language.key)}
+                        className="btn-tap"
+                        style={{ ...styles.serviceFilterButton, ...(isActive ? styles.serviceFilterButtonActive : {}) }}>
+                        <span>{language.name}</span>
+                      </button>
+                    );
+                  })}
                 </div>
-              </details>
+              )}
 
-              <details style={styles.dropdownPanel}>
-                <summary style={styles.dropdownSummary}>
-                  <span>Genre Filter</span>
-                  <span style={{ ...styles.dropdownMeta, ...(genreFilters.length ? { color: '#c4a8ff' } : {}) }}>
-                    {genreFilters.length ? `${genreFilters.length} selected` : 'All'}
-                  </span>
-                </summary>
-                <div style={styles.dropdownBody}>
+              {renderFilterPanel('genre', 'Genre Filter',
+                <span style={{ ...(genreFilters.length ? { color: '#c4a8ff' } : {}) }}>
+                  {genreFilters.length ? `${genreFilters.length} selected` : 'All'}
+                </span>,
+                <>
                   <div style={styles.serviceFilterRow}>
                     {ALL_GENRES.map((genre) => {
                       const isActive = genreFilters.includes(genre.key);
                       return (
-                        <button
-                          key={genre.key}
-                          type="button"
-                          onClick={() => toggleGenreFilter(genre.key)}
+                        <button key={genre.key} type="button" onClick={() => toggleGenreFilter(genre.key)}
                           className="btn-tap"
-                          style={{
-                            ...styles.serviceFilterButton,
-                            ...(isActive ? styles.genreFilterButtonActive : {}),
-                          }}
-                        >
+                          style={{ ...styles.serviceFilterButton, ...(isActive ? styles.genreFilterButtonActive : {}) }}>
                           <span>{genre.label}</span>
                         </button>
                       );
                     })}
                   </div>
                   {genreFilters.length > 0 && (
-                    <button
-                      type="button"
-                      onClick={() => { setGenreFilters([]); setCatalogPage(1); }}
-                      style={{ background: 'none', border: 'none', color: '#e94560', fontSize: 12, cursor: 'pointer', marginTop: 8, fontFamily: 'inherit' }}
-                    >
+                    <button type="button" onClick={() => { setGenreFilters([]); setCatalogPage(1); }}
+                      style={{ background: 'none', border: 'none', color: '#e94560', fontSize: 12, cursor: 'pointer', marginTop: 8, fontFamily: 'inherit' }}>
                       Clear genres
                     </button>
                   )}
+                </>
+              )}
+
+              {renderFilterPanel('year', 'Year Range',
+                <span style={(yearMin || yearMax) ? { color: '#ff8fa3' } : {}}>
+                  {yearMin || yearMax ? `${yearMin || '…'} – ${yearMax || '…'}` : 'All'}
+                </span>,
+                <div style={styles.yearRangeRow}>
+                  <input type="number" placeholder="From year (e.g. 1990)" style={styles.yearInput}
+                    value={yearMin} min="1900" max="2099"
+                    onChange={(e) => { setYearMin(e.target.value); setCatalogPage(1); }} />
+                  <span style={{ color: '#6e7a93', flexShrink: 0 }}>—</span>
+                  <input type="number" placeholder="To year (e.g. 2024)" style={styles.yearInput}
+                    value={yearMax} min="1900" max="2099"
+                    onChange={(e) => { setYearMax(e.target.value); setCatalogPage(1); }} />
+                  {(yearMin || yearMax) && (
+                    <button type="button" onClick={() => { setYearMin(''); setYearMax(''); setCatalogPage(1); }}
+                      style={{ background: 'none', border: 'none', color: '#e94560', cursor: 'pointer', fontFamily: 'inherit', fontSize: 12, flexShrink: 0 }}>
+                      Clear
+                    </button>
+                  )}
                 </div>
-              </details>
+              )}
             </div>
 
             {catalogMeta ? (
               <div style={styles.catalogMeta}>
-                Showing {catalogMeta.visibleCount || movies.length} titles · page {catalogMeta.page || catalogPage} of {Math.ceil((catalogMeta.resultCount || movies.length) / 20)}{catalogMeta.lastUpdatedAt ? ` · Updated ${new Date(catalogMeta.lastUpdatedAt).toLocaleString()}` : ''}{catalogMeta.refreshing ? ' · ⟳ Syncing…' : ''}
+                Showing {catalogMeta.visibleCount || movies.length} titles · page {catalogMeta.page || catalogPage} of {catalogMeta.totalPages || 1}{catalogMeta.lastUpdatedAt ? ` · Updated ${new Date(catalogMeta.lastUpdatedAt).toLocaleString()}` : ''}{catalogMeta.refreshing ? ' · ⟳ Syncing…' : ''}
               </div>
             ) : null}
 
@@ -1602,32 +1980,25 @@ function App() {
                 {movies.map((movie) => {
                   const ratingEntries = ratingEntriesForItem(movie);
                   const isTV = movie.mediaType === 'tv';
+                  const isWatched = watchedIds.has(movie.id);
                   return (
-                    <div key={movie.id} style={styles.movieCard} className="movie-card-wrap" data-media={movie.mediaType}>
+                    <div key={movie.id} style={{ ...styles.movieCard, ...styles.movieCardClickable }} className="movie-card-wrap"
+                      data-media={movie.mediaType} onClick={() => fetchMovieDetails(movie)}>
+                      {/* Watched toggle button */}
+                      <button type="button"
+                        style={{ ...styles.watchedBtn, ...(isWatched ? styles.watchedBtnActive : {}) }}
+                        onClick={(e) => { e.stopPropagation(); toggleWatched(movie); }}
+                        title={isWatched ? 'Remove from watched' : 'Mark as watched'}>
+                        {isWatched ? '✓' : '○'}
+                      </button>
                       {movie.posterUrl ? (
-                        <img
-                          src={movie.posterUrl}
-                          alt={movie.title}
-                          style={styles.moviePoster}
-                          className="movie-poster-el"
-                          loading="lazy"
-                          onError={(e) => {
-                            e.currentTarget.style.display = 'none';
-                            const ph = e.currentTarget.nextSibling;
-                            if (ph) ph.style.display = 'flex';
-                          }}
-                        />
+                        <img src={movie.posterUrl} alt={movie.title} style={styles.moviePoster}
+                          className="movie-poster-el" loading="lazy"
+                          onError={(e) => { e.currentTarget.style.display = 'none'; const ph = e.currentTarget.nextSibling; if (ph) ph.style.display = 'flex'; }} />
                       ) : null}
-                      <div
-                        style={{ ...styles.moviePosterPlaceholder, display: movie.posterUrl ? 'none' : 'flex' }}
-                        className="movie-poster-ph"
-                      >
-                        🎬
-                      </div>
+                      <div style={{ ...styles.moviePosterPlaceholder, display: movie.posterUrl ? 'none' : 'flex' }} className="movie-poster-ph">🎬</div>
                       <div style={styles.movieBody}>
-                        <div style={styles.movieTitle} className="movie-title-el">
-                          {movie.title}
-                        </div>
+                        <div style={styles.movieTitle} className="movie-title-el">{movie.title}</div>
                         <div style={styles.movieSubhead}>
                           <span style={{ ...styles.chip, ...(isTV ? styles.chipTV : styles.chipAccent) }}>{formatMediaType(movie.mediaType)}</span>
                           {movie.year ? <span style={styles.chip}>{movie.year}</span> : null}
@@ -1635,9 +2006,7 @@ function App() {
                         {movie.overview ? <div style={styles.movieOverview}>{movie.overview}</div> : null}
                         {movie.genres?.length ? (
                           <div style={styles.providerRow}>
-                            {movie.genres.slice(0, 4).map((genre) => (
-                              <span key={genre} style={styles.chipGenre}>{genre}</span>
-                            ))}
+                            {movie.genres.slice(0, 4).map((genre) => <span key={genre} style={styles.chipGenre}>{genre}</span>)}
                           </div>
                         ) : null}
                         {movie.availableOn?.length ? (
@@ -1657,8 +2026,9 @@ function App() {
                           <div style={styles.ratingGrid} className="rating-row">
                             {ratingEntries.map((entry) => {
                               const visual = getRatingVisual(movie, entry.key);
+                              const chipAccent = getRatingChipStyle(entry.key, entry.value);
                               return (
-                                <span key={entry.key} style={styles.ratingChip}>
+                                <span key={entry.key} style={{ ...styles.ratingChip, ...chipAccent }}>
                                   {visual ? <img src={visual} alt={entry.label} style={styles.ratingLogo} /> : null}
                                   <span style={styles.ratingContent}>
                                     <span style={styles.ratingLabel}>{entry.label}</span>
@@ -1669,9 +2039,7 @@ function App() {
                             })}
                           </div>
                         ) : catalogMeta?.refreshing ? (
-                          <div style={{ fontSize: 11, color: 'rgba(110,122,147,0.7)', marginTop: 8 }}>
-                            ⏳ Ratings loading…
-                          </div>
+                          <div style={{ fontSize: 11, color: 'rgba(110,122,147,0.7)', marginTop: 8 }}>⏳ Ratings loading…</div>
                         ) : null}
                       </div>
                     </div>
@@ -1681,50 +2049,127 @@ function App() {
             )}
 
             {!movies.length && !loadingMovies && !catalogMeta?.refreshing ? (
-              <div style={styles.emptyState}>
-                No catalog titles match the current filters.
-              </div>
+              <div style={styles.emptyState}>No catalog titles match the current filters.</div>
             ) : null}
+
             {totalPages > 1 ? (
               <div style={styles.paginationRow}>
                 <span style={styles.paginationSummary}>Page {catalogPage} of {totalPages}</span>
-                <button
-                  type="button"
-                  style={styles.pageButton}
-                  className="btn-tap page-btn"
-                  onClick={() => setCatalogPage((current) => Math.max(1, current - 1))}
-                  disabled={catalogPage === 1}
-                >
-                  ‹ Prev
-                </button>
+                <button type="button" style={styles.pageButton} className="btn-tap page-btn"
+                  onClick={() => setCatalogPage((c) => Math.max(1, c - 1))} disabled={catalogPage === 1}>‹ Prev</button>
                 {pageNumbers.map((pageNumber) => (
-                  <button
-                    key={pageNumber}
-                    type="button"
-                    className="btn-tap page-btn"
-                    style={{
-                      ...styles.pageButton,
-                      ...(pageNumber === catalogPage ? styles.pageButtonActive : {}),
-                    }}
-                    onClick={() => setCatalogPage(pageNumber)}
-                  >
-                    {pageNumber}
-                  </button>
+                  <button key={pageNumber} type="button" className="btn-tap page-btn"
+                    style={{ ...styles.pageButton, ...(pageNumber === catalogPage ? styles.pageButtonActive : {}) }}
+                    onClick={() => setCatalogPage(pageNumber)}>{pageNumber}</button>
                 ))}
-                <button
-                  type="button"
-                  style={styles.pageButton}
-                  className="btn-tap page-btn"
-                  onClick={() => setCatalogPage((current) => Math.min(totalPages, current + 1))}
-                  disabled={catalogPage === totalPages}
-                >
-                  Next ›
-                </button>
+                <button type="button" style={styles.pageButton} className="btn-tap page-btn"
+                  onClick={() => setCatalogPage((c) => Math.min(totalPages, c + 1))} disabled={catalogPage === totalPages}>Next ›</button>
               </div>
             ) : null}
+
             {renderFeedback()}
           </div>
         </div>
+
+        {/* ── Movie Detail Modal ── */}
+        {selectedMovie && (
+          <div style={styles.modalOverlay} onClick={() => { setSelectedMovie(null); setMovieDetails(null); }}>
+            <div style={styles.modalCard} onClick={(e) => e.stopPropagation()}>
+              <button type="button" style={styles.modalClose}
+                onClick={() => { setSelectedMovie(null); setMovieDetails(null); }}>✕</button>
+              {(movieDetails?.backdropUrl || selectedMovie.posterUrl) && (
+                <img src={movieDetails?.backdropUrl || selectedMovie.posterUrl} alt=""
+                  style={styles.modalBanner}
+                  onError={(e) => { e.currentTarget.style.display = 'none'; }} />
+              )}
+              <div style={styles.modalBody}>
+                <div style={styles.modalPosterRow}>
+                  {(movieDetails?.posterUrl || selectedMovie.posterUrl) && (
+                    <img src={movieDetails?.posterUrl || selectedMovie.posterUrl} alt={selectedMovie.title} style={styles.modalPoster} />
+                  )}
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={styles.modalTitle}>{selectedMovie.title}</div>
+                    {movieDetails?.tagline && <div style={styles.modalTagline}>"{movieDetails.tagline}"</div>}
+                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 8 }}>
+                      <span style={{ ...styles.chip, ...(selectedMovie.mediaType === 'tv' ? styles.chipTV : styles.chipAccent) }}>{formatMediaType(selectedMovie.mediaType)}</span>
+                      {(movieDetails?.releaseDate || selectedMovie.releaseDate) && (
+                        <span style={styles.chip}>{String(movieDetails?.releaseDate || selectedMovie.releaseDate).slice(0, 4)}</span>
+                      )}
+                      {movieDetails?.runtime && <span style={styles.chip}>{movieDetails.runtime} min</span>}
+                      {movieDetails?.numberOfSeasons && <span style={styles.chip}>{movieDetails.numberOfSeasons} seasons</span>}
+                    </div>
+                    {movieDetails?.genres?.length ? (
+                      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+                        {movieDetails.genres.map((g) => <span key={g} style={styles.chipGenre}>{g}</span>)}
+                      </div>
+                    ) : null}
+                  </div>
+                </div>
+
+                {movieDetails?.directors?.length ? (
+                  <div style={{ marginBottom: 14 }}>
+                    <div style={{ ...styles.sectionLabel, marginBottom: 6 }}>{selectedMovie.mediaType === 'tv' ? 'Created By' : 'Director'}</div>
+                    <div style={{ color: '#c0c8d8', fontSize: 14 }}>{movieDetails.directors.join(', ')}</div>
+                  </div>
+                ) : null}
+
+                {(movieDetails?.overview || selectedMovie.overview) ? (
+                  <div style={{ marginBottom: 16 }}>
+                    <div style={{ ...styles.sectionLabel, marginBottom: 6 }}>Overview</div>
+                    <div style={{ color: '#a0aab8', fontSize: 14, lineHeight: 1.65 }}>{movieDetails?.overview || selectedMovie.overview}</div>
+                  </div>
+                ) : null}
+
+                {movieDetails?.cast?.length ? (
+                  <div style={{ marginBottom: 16 }}>
+                    <div style={{ ...styles.sectionLabel, marginBottom: 10 }}>Cast</div>
+                    <div style={styles.castRow}>
+                      {movieDetails.cast.map((person) => (
+                        <div key={person.id} style={styles.castCard}>
+                          {person.profileUrl
+                            ? <img src={person.profileUrl} alt={person.name} style={styles.castImg} />
+                            : <div style={{ ...styles.castImg, lineHeight: '56px', textAlign: 'center', userSelect: 'none' }}>👤</div>}
+                          <div style={styles.castName}>{person.name}</div>
+                          <div style={styles.castRole}>{person.character}</div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                ) : loadingDetails ? (
+                  <div style={{ color: '#6e7a93', fontSize: 13, marginBottom: 16 }}>Loading details…</div>
+                ) : null}
+
+                {/* Rating chips in modal */}
+                {ratingEntriesForItem(selectedMovie).length ? (
+                  <div style={styles.ratingGrid}>
+                    {ratingEntriesForItem(selectedMovie).map((entry) => {
+                      const visual = getRatingVisual(selectedMovie, entry.key);
+                      const chipAccent = getRatingChipStyle(entry.key, entry.value);
+                      return (
+                        <span key={entry.key} style={{ ...styles.ratingChip, ...chipAccent }}>
+                          {visual ? <img src={visual} alt={entry.label} style={styles.ratingLogo} /> : null}
+                          <span style={styles.ratingContent}>
+                            <span style={styles.ratingLabel}>{entry.label}</span>
+                            <span style={styles.ratingValue}>{entry.value}</span>
+                          </span>
+                        </span>
+                      );
+                    })}
+                  </div>
+                ) : null}
+
+                {/* Watched toggle in modal */}
+                <div style={{ marginTop: 20 }}>
+                  <button type="button"
+                    style={{ ...styles.button, ...(watchedIds.has(selectedMovie.id) ? { background: 'rgba(1,210,119,0.18)', border: '1px solid rgba(1,210,119,0.4)', color: '#01d277', boxShadow: 'none' } : {}) }}
+                    onClick={() => toggleWatched(selectedMovie)}>
+                    {watchedIds.has(selectedMovie.id) ? '✓ Watched — Click to Remove' : '○ Mark as Watched'}
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
       </div>
     );
   }
