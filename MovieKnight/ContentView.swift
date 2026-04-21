@@ -1597,12 +1597,12 @@ struct DetailSheet: View {
                     .font(.system(size: 14)).foregroundColor(.mkMuted).fixedSize(horizontal: false, vertical: true)
             }
         }
-        if let director = d.director, !director.isEmpty {
+        if let directors = d.directors, !directors.isEmpty {
             HStack(spacing: 8) {
                 Image(systemName: "camera.fill").foregroundColor(.mkAccent).font(.system(size: 13))
                 Text((movie.mediaType ?? "movie") == "tv" ? "Creator" : "Director")
                     .font(.system(size: 13, weight: .semibold)).foregroundColor(.mkMuted)
-                Text(director).font(.system(size: 14)).foregroundColor(.mkText)
+                Text(directors.joined(separator: ", ")).font(.system(size: 14)).foregroundColor(.mkText)
             }
         }
         if let genres = movie.genres, !genres.isEmpty {
@@ -1753,8 +1753,8 @@ struct CastCell: View {
                 .font(.system(size: 11, weight: .semibold))
                 .foregroundColor(.mkText).lineLimit(2).multilineTextAlignment(.center)
                 .frame(width: 64)
-            if let char = member.character, !char.isEmpty {
-                Text(char).font(.system(size: 10)).foregroundColor(.mkMuted)
+            if !member.character.isEmpty {
+                Text(member.character).font(.system(size: 10)).foregroundColor(.mkMuted)
                     .lineLimit(1).frame(width: 64)
             }
         }
