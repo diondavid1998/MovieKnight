@@ -1497,7 +1497,7 @@ struct DetailSheet: View {
     @EnvironmentObject var app: AppState
     @Environment(\.dismiss) private var dismiss
     @State private var details: TitleDetails?
-    @State private var isLoading = true
+    @State private var isLoadingExtras = true
     @State private var isTogglingWatched = false
 
     var isWatched: Bool { app.watchedIds.contains(movie.id) }
@@ -1512,18 +1512,66 @@ struct DetailSheet: View {
             ZStack {
                 Color.mkBackground.ignoresSafeArea()
                 ScrollView {
-                    VStack(alignment: .leading, spacing: 0) {
+                    VStack(alignment: .leading, spacing: 16) {
                         backdropSection
+
                         VStack(alignment: .leading, spacing: 16) {
+                            // Title + year + type — always available from CatalogItem
                             titleSection
-                            if isLoading {
-                                HStack { Spacer(); ProgressView().tint(.mkAccent); Spacer() }
-                                    .padding(.top, 24)
+
+                            // Overview — use CatalogItem value immediately
+                            if let overview = movie.overview ?? details?.overview, !overview.isEmpty {
+                                detailRow(icon: "text.alignleft", label: "Overview") {
+                                    Text(overview)
+                                        .font(.system(size: 14)).foregroundColor(.mkMuted)
+                                        .fixedSize(horizontal: false, vertical: true)
+                                }
+                            }
+
+                            // Genres — prefer API-enriched list, fallback to CatalogItem
+                            let genres = details?.genres ?? movie.genres ?? []
+                            if !genres.isEmpty {
+                                detailRow(icon: "tag", label: "Genres") {
+                                    HStack(spacing: 6) {
+                                        ForEach(genres, id: \.self) { PillChip(text: $0, color: .mkMuted) }
+                                    }
+                                }
+                            }
+
+                            // Ratings — all four sources from CatalogItem, no API needed
+                            let ratings = buildRatings()
+                            if !ratings.isEmpty {
+                                detailRow(icon: "star.fill", label: "Ratings") {
+                                    HStack(spacing: 8) {
+                                        ForEach(ratings, id: \.label) { r in RatingChip(entry: r) }
+                                    }
+                                }
+                            }
+
+                            // Streaming services — from CatalogItem
+                            if let providers = movie.availableOn, !providers.isEmpty {
+                                detailRow(icon: "play.rectangle.on.rectangle", label: "Available On") {
+                                    HStack(spacing: 6) {
+                                        ForEach(providers.prefix(6), id: \.self) { ProviderChip(name: $0) }
+                                    }
+                                }
+                            }
+
+                            Divider().overlay(Color.mkBorder)
+
+                            // Extras — loaded from TMDB details endpoint
+                            if isLoadingExtras {
+                                HStack(spacing: 8) {
+                                    ProgressView().scaleEffect(0.8).tint(.mkAccent)
+                                    Text("Loading cast & more…")
+                                        .font(.caption).foregroundColor(.mkMuted)
+                                }
                             } else if let d = details {
-                                detailContent(d)
+                                extrasSection(d)
                             }
                         }
-                        .padding(20)
+                        .padding(.horizontal, 20)
+                        .padding(.bottom, 32)
                     }
                 }
             }
@@ -1544,6 +1592,16 @@ struct DetailSheet: View {
         .task {
             await loadDetails()
             await loadWatched()
+        }
+    }
+
+    // Reusable labeled section block
+    @ViewBuilder
+    func detailRow<Content: View>(icon: String, label: String, @ViewBuilder content: () -> Content) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Label(label, systemImage: icon)
+                .font(.system(size: 13, weight: .semibold)).foregroundColor(.mkAccent)
+            content()
         }
     }
 
@@ -1589,70 +1647,44 @@ struct DetailSheet: View {
     }
 
     @ViewBuilder
-    func detailContent(_ d: TitleDetails) -> some View {
-        if let overview = d.overview ?? movie.overview, !overview.isEmpty {
-            VStack(alignment: .leading, spacing: 6) {
-                Label("Overview", systemImage: "text.alignleft")
-                    .font(.system(size: 13, weight: .semibold)).foregroundColor(.mkAccent)
-                Text(overview)
-                    .font(.system(size: 14)).foregroundColor(.mkMuted).fixedSize(horizontal: false, vertical: true)
+    func extrasSection(_ d: TitleDetails) -> some View {
+        // Runtime (movies) or seasons (TV)
+        if let runtime = d.runtime, runtime > 0 {
+            HStack(spacing: 8) {
+                Image(systemName: "clock").foregroundColor(.mkAccent).font(.system(size: 13))
+                Text("Runtime").font(.system(size: 13, weight: .semibold)).foregroundColor(.mkMuted)
+                Text("\(runtime) min").font(.system(size: 14)).foregroundColor(.mkText)
+            }
+        } else if let seasons = d.numberOfSeasons {
+            HStack(spacing: 8) {
+                Image(systemName: "tv").foregroundColor(.mkAccent).font(.system(size: 13))
+                Text("Seasons").font(.system(size: 13, weight: .semibold)).foregroundColor(.mkMuted)
+                Text("\(seasons)").font(.system(size: 14)).foregroundColor(.mkText)
             }
         }
+        // Director / Creator
         if let directors = d.directors, !directors.isEmpty {
             HStack(spacing: 8) {
                 Image(systemName: "camera.fill").foregroundColor(.mkAccent).font(.system(size: 13))
-                Text((movie.mediaType ?? "movie") == "tv" ? "Creator" : "Director")
+                Text(mediaType == "tv" ? "Creator" : "Director")
                     .font(.system(size: 13, weight: .semibold)).foregroundColor(.mkMuted)
                 Text(directors.joined(separator: ", ")).font(.system(size: 14)).foregroundColor(.mkText)
             }
         }
-        if let genres = movie.genres, !genres.isEmpty {
-            VStack(alignment: .leading, spacing: 6) {
-                Label("Genres", systemImage: "tag").font(.system(size: 13, weight: .semibold)).foregroundColor(.mkAccent)
-                HStack(spacing: 6) { ForEach(genres, id: \.self) { PillChip(text: $0, color: .mkMuted) } }
-            }
-        }
+        // Cast
         if let cast = d.cast, !cast.isEmpty {
-            VStack(alignment: .leading, spacing: 10) {
-                Label("Cast", systemImage: "person.2.fill")
-                    .font(.system(size: 13, weight: .semibold)).foregroundColor(.mkAccent)
+            detailRow(icon: "person.2.fill", label: "Cast") {
                 ScrollView(.horizontal, showsIndicators: false) {
                     HStack(alignment: .top, spacing: 12) {
-                        ForEach(cast.prefix(8)) { member in
-                            CastCell(member: member)
-                        }
+                        ForEach(cast.prefix(8)) { CastCell(member: $0) }
                     }
-                }
-            }
-        }
-        if let providers = movie.availableOn, !providers.isEmpty {
-            VStack(alignment: .leading, spacing: 6) {
-                Label("Available On", systemImage: "play.rectangle.on.rectangle")
-                    .font(.system(size: 13, weight: .semibold)).foregroundColor(.mkAccent)
-                HStack(spacing: 6) { ForEach(providers.prefix(6), id: \.self) { ProviderChip(name: $0) } }
-            }
-        }
-        ratingsSection
-    }
-
-    @ViewBuilder
-    var ratingsSection: some View {
-        let ratings = buildRatings()
-        if !ratings.isEmpty {
-            VStack(alignment: .leading, spacing: 6) {
-                Label("Ratings", systemImage: "star.fill")
-                    .font(.system(size: 13, weight: .semibold)).foregroundColor(.mkAccent)
-                HStack(spacing: 8) {
-                    ForEach(ratings, id: \.label) { r in RatingChip(entry: r) }
                 }
             }
         }
     }
 
     var watchedButton: some View {
-        Button {
-            Task { await toggleWatched() }
-        } label: {
+        Button { Task { await toggleWatched() } } label: {
             HStack(spacing: 5) {
                 if isTogglingWatched {
                     ProgressView().scaleEffect(0.75).tint(isWatched ? .mkMuted : .green)
@@ -1669,14 +1701,14 @@ struct DetailSheet: View {
     }
 
     @MainActor func loadDetails() async {
-        isLoading = true
+        isLoadingExtras = true
         do {
             let d: TitleDetails = try await APIService.shared.get(
                 "/titles/\(mediaType)/\(tmdbId)/details", token: app.token
             )
             details = d
         } catch { }
-        isLoading = false
+        isLoadingExtras = false
     }
 
     @MainActor func loadWatched() async {
