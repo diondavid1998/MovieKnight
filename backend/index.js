@@ -48,6 +48,18 @@ db.run(`CREATE TABLE IF NOT EXISTS watched_items (
   FOREIGN KEY (user_id) REFERENCES users(id)
 )`);
 
+db.run(`CREATE TABLE IF NOT EXISTS watchlist_items (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  user_id INTEGER NOT NULL,
+  item_id TEXT NOT NULL,
+  media_type TEXT,
+  title TEXT,
+  poster_url TEXT,
+  added_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE(user_id, item_id),
+  FOREIGN KEY (user_id) REFERENCES users(id)
+)`);
+
 db.run(`CREATE TABLE IF NOT EXISTS reset_tokens (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   user_id INTEGER NOT NULL,

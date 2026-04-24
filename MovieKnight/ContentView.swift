@@ -18,19 +18,22 @@ final class AppState: ObservableObject {
     @Published var selectedPlatforms: [String] = []
     @Published var selectedLanguages: [String] = []
     @Published var watchedIds: Set<String> = []
+    @Published var watchlistIds: Set<String> = []
 
-    private let tokenKey     = "mk_token"
-    private let usernameKey  = "mk_username"
-    private let platformsKey = "mk_platforms"
-    private let languagesKey = "mk_languages"
-    private let watchedKey   = "mk_watched_ids"
+    private let tokenKey      = "mk_token"
+    private let usernameKey   = "mk_username"
+    private let platformsKey  = "mk_platforms"
+    private let languagesKey  = "mk_languages"
+    private let watchedKey    = "mk_watched_ids"
+    private let watchlistKey  = "mk_watchlist_ids"
 
     init() {
         token    = UserDefaults.standard.string(forKey: tokenKey)?.trimmingCharacters(in: .whitespaces) ?? ""
         username = UserDefaults.standard.string(forKey: usernameKey) ?? ""
         selectedPlatforms = UserDefaults.standard.stringArray(forKey: platformsKey) ?? []
         selectedLanguages = UserDefaults.standard.stringArray(forKey: languagesKey) ?? []
-        watchedIds = Set(UserDefaults.standard.stringArray(forKey: watchedKey) ?? [])
+        watchedIds  = Set(UserDefaults.standard.stringArray(forKey: watchedKey) ?? [])
+        watchlistIds = Set(UserDefaults.standard.stringArray(forKey: watchlistKey) ?? [])
         page = token.isEmpty ? .auth : .catalog
     }
 
@@ -67,13 +70,20 @@ final class AppState: ObservableObject {
         UserDefaults.standard.set(Array(watchedIds), forKey: watchedKey)
     }
 
+    func setWatchlisted(_ id: String, on: Bool) {
+        if on { watchlistIds.insert(id) } else { watchlistIds.remove(id) }
+        UserDefaults.standard.set(Array(watchlistIds), forKey: watchlistKey)
+    }
+
     func logout() {
-        token = ""; username = ""; selectedPlatforms = []; selectedLanguages = []; watchedIds = []
+        token = ""; username = ""; selectedPlatforms = []; selectedLanguages = []
+        watchedIds = []; watchlistIds = []
         UserDefaults.standard.removeObject(forKey: tokenKey)
         UserDefaults.standard.removeObject(forKey: usernameKey)
         UserDefaults.standard.removeObject(forKey: platformsKey)
         UserDefaults.standard.removeObject(forKey: languagesKey)
         UserDefaults.standard.removeObject(forKey: watchedKey)
+        UserDefaults.standard.removeObject(forKey: watchlistKey)
         page = .auth
     }
 }
@@ -595,6 +605,7 @@ struct CatalogView: View {
     @State private var yearMin = ""
     @State private var yearMax = ""
     @State private var hideWatched = false
+    @State private var watchlistOnly = false
     @State private var selectedDetail: CatalogItem? = nil
     @State private var pollingTask: Task<Void, Never>?
 
@@ -747,6 +758,16 @@ struct CatalogView: View {
                         )
                     }
                 }
+                if !app.watchlistIds.isEmpty {
+                    Button {
+                        watchlistOnly.toggle(); page = 1; Task { await fetch() }
+                    } label: {
+                        FilterChip(
+                            label: "From Watchlist",
+                            icon: "bookmark.fill", active: watchlistOnly
+                        )
+                    }
+                }
                 if !app.selectedPlatforms.isEmpty {
                     HStack(spacing: 5) {
                         Image(systemName: "play.rectangle.on.rectangle").font(.system(size: 10))
@@ -864,6 +885,7 @@ struct CatalogView: View {
         if !yearMin.isEmpty               { params["yearMin"] = yearMin }
         if !yearMax.isEmpty               { params["yearMax"] = yearMax }
         if hideWatched && !app.watchedIds.isEmpty { params["hideWatched"] = "1" }
+        if watchlistOnly && !app.watchlistIds.isEmpty { params["watchlistOnly"] = "true" }
         do {
             let resp: CatalogResponse = try await APIService.shared.get("/movies", params: params, token: app.token)
             if let serverError = resp.error, resp.catalog.isEmpty {
@@ -1996,6 +2018,13 @@ struct ProfileTabView: View {
     @State private var avatarUIImage: UIImage?
     @State private var profilePicBase64: String?
     @State private var isLoadingAccount = true
+    // Letterboxd import
+    @State private var showFileImporter = false
+    @State private var lbxImportType = ""
+    @State private var lbxItems: [[String: Any]] = []
+    @State private var showLbxConfirm = false
+    @State private var lbxImportProgress: String? = nil
+    @State private var lbxImportDone: String? = nil
 
     var body: some View {
         ScrollView {
@@ -2018,6 +2047,37 @@ struct ProfileTabView: View {
                 MKButton(label: "Save Changes", icon: "checkmark.circle.fill", isLoading: isSaving) {
                     Task { await saveProfile() }
                 }
+
+                Divider().overlay(Color.mkBorder)
+
+                // ── Letterboxd Import ──────────────────────────────────────
+                VStack(alignment: .leading, spacing: 10) {
+                    HStack(spacing: 8) {
+                        Image(systemName: "square.and.arrow.down")
+                            .foregroundColor(.mkAccent)
+                        Text("Letterboxd Import")
+                            .font(.system(size: 15, weight: .semibold))
+                            .foregroundColor(.mkText)
+                    }
+                    Text("Export your Letterboxd data (watched.csv or watchlist.csv) and import it here.")
+                        .font(.caption)
+                        .foregroundColor(.mkMuted)
+                        .fixedSize(horizontal: false, vertical: true)
+
+                    if let progress = lbxImportProgress {
+                        HStack(spacing: 8) {
+                            ProgressView().tint(.mkAccent).scaleEffect(0.8)
+                            Text(progress).font(.caption).foregroundColor(.mkMuted)
+                        }
+                    } else if let done = lbxImportDone {
+                        Text(done).font(.caption).foregroundColor(.green)
+                    }
+
+                    MKButton(label: "Select CSV File", icon: "folder.badge.plus", isLoading: lbxImportProgress != nil) {
+                        showFileImporter = true
+                    }
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(.bottom, 24)
             }
             .padding(.horizontal, 16).padding(.top, 12)
@@ -2026,6 +2086,104 @@ struct ProfileTabView: View {
         .onChange(of: avatarItem) { item in
             Task { await loadAvatar(from: item) }
         }
+        .fileImporter(
+            isPresented: $showFileImporter,
+            allowedContentTypes: [.commaSeparatedText, .plainText, .data],
+            allowsMultipleSelection: false
+        ) { result in
+            guard let url = try? result.get().first else { return }
+            Task { await handleLetterboxdFile(url: url) }
+        }
+        .alert(
+            lbxImportType == "watched"
+                ? "Import \(lbxItems.count) Watched Movies?"
+                : "Import \(lbxItems.count) Watchlist Movies?",
+            isPresented: $showLbxConfirm
+        ) {
+            Button("Import") { Task { await runLetterboxdImport() } }
+            Button("Cancel", role: .cancel) { }
+        } message: {
+            Text(lbxImportType == "watched"
+                ? "These will be added to your watched history."
+                : "These will be saved to your watchlist.")
+        }
+    }
+
+    @MainActor func handleLetterboxdFile(url: URL) async {
+        lbxImportDone = nil
+        lbxImportProgress = "Reading file…"
+        let accessed = url.startAccessingSecurityScopedResource()
+        defer { if accessed { url.stopAccessingSecurityScopedResource() } }
+        guard let text = try? String(contentsOf: url, encoding: .utf8) else {
+            lbxImportProgress = nil
+            lbxImportDone = "⚠ Could not read file"
+            return
+        }
+        lbxImportProgress = "Parsing CSV…"
+        do {
+            let resp: LetterboxdPreviewResult = try await APIService.shared.post(
+                "/import/letterboxd/preview",
+                body: ["csvText": text],
+                token: app.token
+            )
+            lbxImportType = resp.importType ?? "watched"
+            lbxItems = resp.items.map { item in ["name": item.name, "year": item.year] }
+            lbxImportProgress = nil
+            if lbxItems.isEmpty {
+                lbxImportDone = "No valid rows found in CSV"
+            } else {
+                showLbxConfirm = true
+            }
+        } catch {
+            lbxImportProgress = nil
+            lbxImportDone = "⚠ \((error as? APIError)?.errorDescription ?? "Preview failed")"
+        }
+    }
+
+    @MainActor func runLetterboxdImport() async {
+        let batchSize = 50
+        var offset = 0
+        var totalMatched = 0
+        var totalNotFound = 0
+
+        while offset < lbxItems.count {
+            let chunk = Array(lbxItems[offset..<min(offset + batchSize, lbxItems.count)])
+            lbxImportProgress = "Importing \(offset + chunk.count) of \(lbxItems.count)…"
+
+            let encodableChunk: [[String: Any]] = chunk.compactMap { item in
+                guard let name = item["name"] as? String, let year = item["year"] as? Int else { return nil }
+                return ["name": name, "year": year]
+            }
+
+            do {
+                let resp: LetterboxdImportResponse = try await APIService.shared.post(
+                    "/import/letterboxd",
+                    body: ["items": encodableChunk, "importType": lbxImportType],
+                    token: app.token
+                )
+                totalMatched  += resp.matched ?? 0
+                totalNotFound += resp.notFound ?? 0
+            } catch { break }
+
+            offset += batchSize
+        }
+
+        // Update local watchlist IDs so filter chip appears immediately
+        if lbxImportType == "watchlist" {
+            // Reload watchlist IDs by fetching from server
+            if let resp = try? await APIService.shared.get("/watchlist", token: app.token) as WatchlistResponse {
+                for item in resp.items ?? [] { app.setWatchlisted(item.itemId, on: true) }
+            }
+        } else {
+            // Reload watched IDs
+            if let resp = try? await APIService.shared.get("/watched", token: app.token) as WatchedListResponse {
+                for item in resp.items ?? [] { app.setWatched(item.itemId, watched: true) }
+            }
+        }
+
+        lbxImportProgress = nil
+        lbxImportDone = "✓ Imported \(totalMatched) of \(lbxItems.count) movies\(totalNotFound > 0 ? " (\(totalNotFound) not found)" : "")"
+        lbxItems = []
     }
 
     var avatarSection: some View {
@@ -2114,69 +2272,93 @@ struct ProfileTabView: View {
 struct WatchlistTabView: View {
     @EnvironmentObject var app: AppState
     @State private var watchedItems: [WatchedItem] = []
+    @State private var watchlistItems: [WatchlistItem] = []
     @State private var isLoading = true
-    @State private var errorMsg: String?
 
     var body: some View {
         Group {
             if isLoading {
                 VStack { Spacer(); ProgressView().tint(.mkAccent); Spacer() }
-            } else if watchedItems.isEmpty {
+            } else if watchedItems.isEmpty && watchlistItems.isEmpty {
                 VStack(spacing: 12) {
                     Spacer()
                     Image(systemName: "checkmark.circle").font(.system(size: 44)).foregroundColor(.mkMuted)
-                    Text("No watched titles yet").font(.title3).bold().foregroundColor(.mkMuted)
-                    Text("Mark titles as watched from the catalog to track them here.")
+                    Text("Nothing here yet").font(.title3).bold().foregroundColor(.mkMuted)
+                    Text("Mark titles as watched from the catalog, or import your Letterboxd data in Profile.")
                         .font(.subheadline).foregroundColor(.mkMuted.opacity(0.7))
                         .multilineTextAlignment(.center).padding(.horizontal, 40)
                     Spacer()
                 }
             } else {
                 List {
-                    ForEach(watchedItems) { item in
-                        HStack(spacing: 12) {
-                            Image(systemName: (item.mediaType ?? "movie") == "tv" ? "tv" : "film")
-                                .foregroundColor(.mkAccent).frame(width: 24)
-                            VStack(alignment: .leading, spacing: 2) {
-                                Text(item.title ?? "Unknown Title").font(.system(size: 15, weight: .semibold)).foregroundColor(.mkText)
-                                Text((item.mediaType ?? "movie") == "tv" ? "TV Show" : "Movie")
-                                    .font(.caption).foregroundColor(.mkMuted)
+                    if !watchedItems.isEmpty {
+                        Section(header: Text("Watched").foregroundColor(.mkMuted)) {
+                            ForEach(watchedItems) { item in
+                                watchRow(item.itemId, title: item.title, mediaType: item.mediaType, icon: "checkmark.circle.fill", iconColor: .green)
                             }
-                            Spacer()
-                            Image(systemName: "checkmark.circle.fill").foregroundColor(.green)
+                            .onDelete { offsets in Task { await removeWatched(at: offsets) } }
                         }
-                        .listRowBackground(Color.mkSurface)
                     }
-                    .onDelete { offsets in Task { await removeItems(at: offsets) } }
+                    if !watchlistItems.isEmpty {
+                        Section(header: Text("Letterboxd Watchlist").foregroundColor(.mkMuted)) {
+                            ForEach(watchlistItems) { item in
+                                watchRow(item.itemId, title: item.title, mediaType: item.mediaType, icon: "bookmark.fill", iconColor: .mkAccent)
+                            }
+                            .onDelete { offsets in Task { await removeWatchlist(at: offsets) } }
+                        }
+                    }
                 }
                 .listStyle(.plain)
                 .background(Color.mkBackground)
             }
         }
-        .task { await loadWatched() }
+        .task { await loadAll() }
     }
 
-    @MainActor func loadWatched() async {
+    @ViewBuilder
+    func watchRow(_ itemId: String, title: String?, mediaType: String?, icon: String, iconColor: Color) -> some View {
+        HStack(spacing: 12) {
+            Image(systemName: (mediaType ?? "movie") == "tv" ? "tv" : "film")
+                .foregroundColor(.mkAccent).frame(width: 24)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title ?? "Unknown Title").font(.system(size: 15, weight: .semibold)).foregroundColor(.mkText)
+                Text((mediaType ?? "movie") == "tv" ? "TV Show" : "Movie")
+                    .font(.caption).foregroundColor(.mkMuted)
+            }
+            Spacer()
+            Image(systemName: icon).foregroundColor(iconColor)
+        }
+        .listRowBackground(Color.mkSurface)
+    }
+
+    @MainActor func loadAll() async {
         isLoading = true
-        do {
-            let resp: WatchedListResponse = try await APIService.shared.get("/watched", token: app.token)
-            watchedItems = resp.items ?? []
-            for item in resp.items ?? [] { app.setWatched(item.itemId, watched: true) }
-        } catch { errorMsg = "Failed to load watchlist" }
+        async let watchedResp: WatchedListResponse? = try? APIService.shared.get("/watched", token: app.token)
+        async let watchlistResp: WatchlistResponse? = try? APIService.shared.get("/watchlist", token: app.token)
+        let (w, wl) = await (watchedResp, watchlistResp)
+        watchedItems = w?.items ?? []
+        watchlistItems = wl?.items ?? []
+        for item in watchedItems { app.setWatched(item.itemId, watched: true) }
+        for item in watchlistItems { app.setWatchlisted(item.itemId, on: true) }
         isLoading = false
     }
 
-    @MainActor func removeItems(at offsets: IndexSet) async {
+    @MainActor func removeWatched(at offsets: IndexSet) async {
         for i in offsets {
             let item = watchedItems[i]
-            do {
-                let _: ToggleWatchedResponse = try await APIService.shared.delete(
-                    "/watched/\(item.itemId)", token: app.token
-                )
-                app.setWatched(item.itemId, watched: false)
-            } catch { }
+            _ = try? await APIService.shared.delete("/watched/\(item.itemId)", token: app.token) as ToggleWatchedResponse
+            app.setWatched(item.itemId, watched: false)
         }
         watchedItems.remove(atOffsets: offsets)
+    }
+
+    @MainActor func removeWatchlist(at offsets: IndexSet) async {
+        for i in offsets {
+            let item = watchlistItems[i]
+            _ = try? await APIService.shared.delete("/watchlist/\(item.itemId)", token: app.token) as SimpleResponse
+            app.setWatchlisted(item.itemId, on: false)
+        }
+        watchlistItems.remove(atOffsets: offsets)
     }
 }
 

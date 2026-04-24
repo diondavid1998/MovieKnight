@@ -188,6 +188,61 @@ struct ToggleWatchedResponse: Decodable {
     let error: String?
 }
 
+// MARK: - Watchlist (Letterboxd)
+
+struct WatchlistItem: Decodable, Identifiable {
+    var id: String { itemId }
+    let itemId: String
+    let mediaType: String?
+    let title: String?
+    let posterUrl: String?
+}
+
+struct WatchlistResponse: Decodable {
+    let items: [WatchlistItem]?
+}
+
+struct LetterboxdPreviewResponse: Decodable {
+    let importType: String?
+    let count: Int?
+    let items: [[String: AnyCodable]]?
+}
+
+// Simple wrapper so we can decode heterogeneous JSON values
+struct AnyCodable: Decodable {
+    let value: Any
+    init(from decoder: Decoder) throws {
+        let c = try decoder.singleValueContainer()
+        if let s = try? c.decode(String.self) { value = s }
+        else if let i = try? c.decode(Int.self) { value = i }
+        else { value = "" }
+    }
+}
+
+struct LetterboxdPreviewItem: Decodable {
+    let name: String
+    let year: Int
+}
+
+struct LetterboxdPreviewResult: Decodable {
+    let importType: String?
+    let count: Int?
+    let items: [LetterboxdPreviewItem]
+}
+
+struct LetterboxdImportResponse: Decodable {
+    let matched: Int?
+    let notFound: Int?
+    let processed: Int?
+}
+
+// Encodable wrapper for heterogeneous JSON values (used in Letterboxd batch import)
+struct AnyCodableEnc: Encodable {
+    private let _encode: (Encoder) throws -> Void
+    init(_ value: some Encodable) { _encode = { try value.encode(to: $0) } }
+    func encode(to encoder: Encoder) throws { try _encode(encoder) }
+}
+
 // MARK: - Account
 
 struct AccountInfo: Decodable {
@@ -199,6 +254,11 @@ struct AccountInfo: Decodable {
 struct UpdateAccountResponse: Decodable {
     let success: Bool?
     let token: String?
+    let error: String?
+}
+
+struct SimpleResponse: Decodable {
+    let success: Bool?
     let error: String?
 }
 

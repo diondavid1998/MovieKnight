@@ -747,6 +747,13 @@ function App() {
   const [editEmail, setEditEmail] = useState('');
   const [editPassword, setEditPassword] = useState('');
   const [watchlistItems, setWatchlistItems] = useState([]);
+  const [watchlistOnlyItems, setWatchlistOnlyItems] = useState([]);
+  const [watchlistIds, setWatchlistIds] = useState(new Set());
+  const [watchlistOnly, setWatchlistOnly] = useState(false);
+  const [lbxFile, setLbxFile] = useState(null);
+  const [lbxPreview, setLbxPreview] = useState(null);
+  const [lbxProgress, setLbxProgress] = useState('');
+  const [lbxDone, setLbxDone] = useState('');
   const [resetStep, setResetStep] = useState(0); // 0: off, 1: email, 2: code, 3: done
   const [resetEmail, setResetEmail] = useState('');
   const [resetCode, setResetCode] = useState('');
@@ -868,6 +875,86 @@ function App() {
       setWatchlistItems(items);
     } catch { /* silent */ }
   }, [token]); // eslint-disable-line
+
+  const loadWatchlist = async () => {
+    if (!token) return;
+    try {
+      const response = await apiFetch('/watchlist');
+      if (!response.ok) return;
+      const data = await parseResponseBody(response);
+      const items = Array.isArray(data.items) ? data.items : [];
+      setWatchlistOnlyItems(items);
+      setWatchlistIds(new Set(items.map((item) => item.item_id)));
+    } catch { /* silent */ }
+  };
+
+  const removeFromWatchlist = async (itemId) => {
+    try {
+      await apiFetch(`/watchlist/${encodeURIComponent(itemId)}`, { method: 'DELETE' });
+      setWatchlistOnlyItems((prev) => prev.filter((i) => i.item_id !== itemId));
+      setWatchlistIds((prev) => { const next = new Set(prev); next.delete(itemId); return next; });
+    } catch { /* silent */ }
+  };
+
+  const handleLbxFileChange = async (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setLbxFile(file);
+    setLbxDone('');
+    setLbxPreview(null);
+    setLbxProgress('Parsing CSV…');
+    try {
+      const text = await file.text();
+      const response = await apiFetch('/import/letterboxd/preview', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ csvText: text }),
+      });
+      if (!response.ok) throw new Error('Preview failed');
+      const data = await parseResponseBody(response);
+      setLbxPreview(data);
+      setLbxProgress('');
+    } catch (err) {
+      setLbxProgress('');
+      setLbxDone('⚠ ' + (err.message || 'Failed to parse CSV'));
+    }
+  };
+
+  const handleLbxImport = async () => {
+    if (!lbxPreview || !lbxFile) return;
+    const { items, importType } = lbxPreview;
+    const batchSize = 50;
+    let offset = 0;
+    let totalMatched = 0;
+    let totalNotFound = 0;
+    const text = await lbxFile.text();
+    // Re-parse items just in case (preview items already available)
+    const allItems = items || [];
+    setLbxPreview(null);
+    while (offset < allItems.length) {
+      const chunk = allItems.slice(offset, offset + batchSize);
+      setLbxProgress(`Importing ${Math.min(offset + batchSize, allItems.length)} of ${allItems.length}…`);
+      try {
+        const response = await apiFetch('/import/letterboxd', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ items: chunk, importType }),
+        });
+        if (response.ok) {
+          const data = await parseResponseBody(response);
+          totalMatched += data.matched || 0;
+          totalNotFound += data.notFound || 0;
+        }
+      } catch { break; }
+      offset += batchSize;
+    }
+    // Refresh lists
+    if (importType === 'watchlist') { await loadWatchlist(); }
+    else { await loadWatched(); }
+    setLbxProgress('');
+    setLbxFile(null);
+    setLbxDone(`✓ Imported ${totalMatched} of ${allItems.length} movies${totalNotFound > 0 ? ` (${totalNotFound} not found)` : ''}`);
+  };
 
   const toggleWatched = async (movie) => {
     const itemId = movie.id;
@@ -1068,6 +1155,7 @@ function App() {
       if (yearMin) query.set('yearMin', yearMin);
       if (yearMax) query.set('yearMax', yearMax);
       if (hideWatched) query.set('hideWatched', 'true');
+      if (watchlistOnly && watchlistIds.size > 0) query.set('watchlistOnly', 'true');
 
       const response = await apiFetch(`/movies?${query.toString()}`, {
         signal: controller.signal,
@@ -1284,6 +1372,7 @@ function App() {
   useEffect(() => {
     if (page === 'movies' && token) {
       loadWatched();
+      loadWatchlist();
     }
   }, [page, token]); // eslint-disable-line
 
@@ -1291,7 +1380,7 @@ function App() {
   useEffect(() => {
     if (!showSettings) return;
     if (settingsTab === 'profile') fetchAccount();
-    if (settingsTab === 'watchlist') loadWatched();
+    if (settingsTab === 'watchlist') { loadWatched(); loadWatchlist(); }
   }, [settingsTab, showSettings]); // eslint-disable-line
 
   // Auto-retry when the backend is still warming up the catalog cache
@@ -1746,16 +1835,50 @@ function App() {
                 <div style={styles.sectionActions}>
                   <button style={styles.button} className="btn-tap" type="submit">Save Profile</button>
                 </div>
+
+                {/* Letterboxd Import */}
+                <div style={{ marginTop: 28, padding: '20px', background: 'rgba(108,99,255,0.08)', borderRadius: 12, border: '1px solid rgba(108,99,255,0.25)' }}>
+                  <div style={{ fontWeight: 700, color: '#8b82ff', fontSize: 14, marginBottom: 6 }}>📦 Import from Letterboxd</div>
+                  <div style={{ color: '#6e7a93', fontSize: 12, marginBottom: 14, lineHeight: 1.5 }}>
+                    Export your diary or watchlist from Letterboxd (letterboxd.com/settings/data), then upload the CSV here.
+                  </div>
+                  {!lbxPreview && !lbxProgress && (
+                    <label style={{ ...styles.button, ...styles.buttonSecondary, display: 'inline-block', cursor: 'pointer', fontSize: 13 }}>
+                      Choose CSV file
+                      <input type="file" accept=".csv,text/csv" style={{ display: 'none' }} onChange={handleLbxFileChange} />
+                    </label>
+                  )}
+                  {lbxProgress && <div style={{ color: '#c0c8d8', fontSize: 13, marginTop: 8 }}>{lbxProgress}</div>}
+                  {lbxDone && <div style={{ color: lbxDone.startsWith('✓') ? '#01d277' : '#e94560', fontSize: 13, marginTop: 8 }}>{lbxDone}</div>}
+                  {lbxPreview && !lbxProgress && (
+                    <div style={{ marginTop: 8 }}>
+                      <div style={{ color: '#c0c8d8', fontSize: 13, marginBottom: 12 }}>
+                        Found <strong style={{ color: '#eef0f7' }}>{lbxPreview.count}</strong> {lbxPreview.importType === 'watchlist' ? 'watchlist items' : 'watched movies'} to import.
+                      </div>
+                      <div style={{ display: 'flex', gap: 10 }}>
+                        <button type="button" style={{ ...styles.button, fontSize: 13 }} onClick={handleLbxImport}>
+                          Import all
+                        </button>
+                        <button type="button" style={{ ...styles.button, ...styles.buttonSecondary, fontSize: 13 }} onClick={() => { setLbxPreview(null); setLbxFile(null); }}>
+                          Cancel
+                        </button>
+                      </div>
+                    </div>
+                  )}
+                </div>
               </form>
             )}
 
             {/* ── Watchlist Tab ── */}
             {!isFirstSetup && settingsTab === 'watchlist' && (
               <div style={{ width: '100%' }}>
-                {watchlistItems.length === 0 ? (
-                  <p style={styles.emptyState}>You haven't marked anything as watched yet.</p>
-                ) : (
-                  watchlistItems.map((item) => (
+                {/* Watched section */}
+                <div style={{ fontWeight: 700, color: '#01d277', fontSize: 13, textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 10 }}>
+                  ✓ Watched ({watchlistItems.length})
+                </div>
+                {watchlistItems.length === 0
+                  ? <p style={{ ...styles.emptyState, marginBottom: 16 }}>No watched content yet.</p>
+                  : watchlistItems.map((item) => (
                     <div key={item.item_id} style={styles.watchlistRow}>
                       {item.poster_url
                         ? <img src={item.poster_url} alt={item.title} style={styles.watchlistPoster} />
@@ -1770,8 +1893,30 @@ function App() {
                         Remove
                       </button>
                     </div>
-                  ))
-                )}
+                  ))}
+
+                {/* Letterboxd Watchlist section */}
+                <div style={{ fontWeight: 700, color: '#8b82ff', fontSize: 13, textTransform: 'uppercase', letterSpacing: '0.08em', marginTop: 24, marginBottom: 10 }}>
+                  🔖 Letterboxd Watchlist ({watchlistOnlyItems.length})
+                </div>
+                {watchlistOnlyItems.length === 0
+                  ? <p style={styles.emptyState}>No watchlist items. Import from Letterboxd in the Profile tab.</p>
+                  : watchlistOnlyItems.map((item) => (
+                    <div key={item.item_id} style={styles.watchlistRow}>
+                      {item.poster_url
+                        ? <img src={item.poster_url} alt={item.title} style={styles.watchlistPoster} />
+                        : <div style={{ ...styles.watchlistPoster, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 18 }}>🔖</div>}
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <div style={{ fontWeight: 700, fontSize: 14, color: '#eef0f7', marginBottom: 2 }}>{item.title || item.item_id}</div>
+                        <div style={{ fontSize: 11, color: '#6e7a93', textTransform: 'uppercase', letterSpacing: '0.06em' }}>{item.media_type || ''}</div>
+                      </div>
+                      <button type="button"
+                        style={{ background: 'none', border: 'none', color: '#e94560', cursor: 'pointer', fontFamily: 'inherit', fontSize: 13, fontWeight: 600, padding: '6px 10px' }}
+                        onClick={() => removeFromWatchlist(item.item_id)}>
+                        Remove
+                      </button>
+                    </div>
+                  ))}
               </div>
             )}
 
@@ -1870,6 +2015,18 @@ function App() {
                   {hideWatched ? '✓ Hiding watched' : '○ Show all'}
                 </button>
                 <span style={{ color: '#6e7a93', fontSize: 12 }}>{watchedIds.size} watched</span>
+              </div>
+            )}
+
+            {/* From Watchlist toggle */}
+            {watchlistIds.size > 0 && (
+              <div style={{ width: '100%', marginBottom: 12, display: 'flex', alignItems: 'center', gap: 10 }}>
+                <button type="button"
+                  style={{ ...styles.serviceFilterButton, ...(watchlistOnly ? { background: 'rgba(108,99,255,0.15)', border: '1px solid rgba(108,99,255,0.5)', color: '#8b82ff' } : {}) }}
+                  onClick={() => { setWatchlistOnly((v) => !v); setCatalogPage(1); }}>
+                  {watchlistOnly ? '🔖 From watchlist' : '○ From watchlist'}
+                </button>
+                <span style={{ color: '#6e7a93', fontSize: 12 }}>{watchlistIds.size} saved</span>
               </div>
             )}
 

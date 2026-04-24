@@ -516,6 +516,57 @@ async function fetchCatalogByPlatforms(platforms, options = {}) {
   };
 }
 
+// ── Letterboxd title search ───────────────────────────────────────────────
+// Searches TMDB by title + year with ±1 year tolerance.
+// Tries movie first, then TV, returns {itemId, title, posterUrl, mediaType} or null.
+async function searchTitleOnTmdb(name, year) {
+  const normalize = (s) => s.toLowerCase().replace(/[^a-z0-9 ]/g, '').trim();
+  const normName = normalize(name);
+
+  const trySearch = async (endpoint, yearParam, yearValue) => {
+    try {
+      const data = await fetchTmdb(endpoint, { query: name, [yearParam]: yearValue, language: 'en-US' });
+      const results = data.results || [];
+      const match =
+        results.find((r) => {
+          const t = normalize(r.title || r.name || '');
+          return t === normName || t.includes(normName) || normName.includes(t);
+        }) || (results.length > 0 ? results[0] : null);
+      return match;
+    } catch {
+      return null;
+    }
+  };
+
+  // Try movie with exact year, then ±1
+  for (const yr of [year, year - 1, year + 1]) {
+    const match = await trySearch('/search/movie', 'primary_release_year', yr);
+    if (match) {
+      return {
+        itemId: `movie-${match.id}`,
+        title: match.title,
+        posterUrl: match.poster_path ? `${TMDB_IMAGE_BASE_URL}${match.poster_path}` : null,
+        mediaType: 'movie',
+      };
+    }
+  }
+
+  // Fallback to TV search
+  for (const yr of [year, year - 1, year + 1]) {
+    const match = await trySearch('/search/tv', 'first_air_date_year', yr);
+    if (match) {
+      return {
+        itemId: `tv-${match.id}`,
+        title: match.name,
+        posterUrl: match.poster_path ? `${TMDB_IMAGE_BASE_URL}${match.poster_path}` : null,
+        mediaType: 'tv',
+      };
+    }
+  }
+
+  return null;
+}
+
 module.exports = {
   PLATFORM_CONFIG,
   fetchOmdbRatings,
@@ -523,6 +574,7 @@ module.exports = {
   fetchTitleDetails,
   fetchTitleWithCredits,
   isOmdbRateLimited,
+  searchTitleOnTmdb,
   // Exported for unit testing
   buildRatingsPayload,
   toSortableRating,

@@ -602,6 +602,7 @@ async function readCachedCatalog(
     yearMin = null,
     yearMax = null,
     excludeItemIds = [],
+    watchlistItemIds = [],
   }
 ) {
   const filters = ['scope_key = ?'];
@@ -610,6 +611,7 @@ async function readCachedCatalog(
   const normalizedLanguageFilters = [...new Set(languageFilters.filter(Boolean))];
   const normalizedGenreFilters = [...new Set(genreFilters.filter(Boolean))];
   const normalizedExcludeIds = [...new Set(excludeItemIds.filter(Boolean))];
+  const normalizedWatchlistIds = [...new Set(watchlistItemIds.filter(Boolean))];
 
   if (mediaType === 'movie' || mediaType === 'tv') {
     filters.push('media_type = ?');
@@ -659,6 +661,13 @@ async function readCachedCatalog(
       `(media_type || '-' || CAST(tmdb_id AS TEXT)) NOT IN (${normalizedExcludeIds.map(() => '?').join(', ')})`
     );
     params.push(...normalizedExcludeIds);
+  }
+
+  if (normalizedWatchlistIds.length) {
+    filters.push(
+      `(media_type || '-' || CAST(tmdb_id AS TEXT)) IN (${normalizedWatchlistIds.map(() => '?').join(', ')})`
+    );
+    params.push(...normalizedWatchlistIds);
   }
 
   const whereClause = filters.join(' AND ');

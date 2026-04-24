@@ -16,7 +16,7 @@ const {
   ensureScopeSynced,
   readCachedCatalog,
 } = require('./catalogCache');
-const { fetchTitleWithCredits } = require('./movieService');
+const { fetchTitleWithCredits, searchTitleOnTmdb } = require('./movieService');
 
 const JWT_SECRET = process.env.JWT_SECRET || 'test-secret-key';
 const TMDB_IMAGE_BASE = 'https://image.tmdb.org/t/p';
@@ -473,11 +473,21 @@ function createApp(db, { disableRateLimit = false } = {}) {
             const yearMin = req.query.yearMin ? parseInt(req.query.yearMin, 10) : null;
             const yearMax = req.query.yearMax ? parseInt(req.query.yearMax, 10) : null;
             const hideWatched = req.query.hideWatched === 'true';
+            const watchlistOnly = req.query.watchlistOnly === 'true';
 
             let excludeItemIds = [];
             if (hideWatched) {
               excludeItemIds = await new Promise((resolve) =>
                 db.all('SELECT item_id FROM watched_items WHERE user_id = ?', [req.user.id], (e, rows) =>
+                  resolve(rows ? rows.map((r) => r.item_id) : [])
+                )
+              );
+            }
+
+            let watchlistItemIds = [];
+            if (watchlistOnly) {
+              watchlistItemIds = await new Promise((resolve) =>
+                db.all('SELECT item_id FROM watchlist_items WHERE user_id = ?', [req.user.id], (e, rows) =>
                   resolve(rows ? rows.map((r) => r.item_id) : [])
                 )
               );
@@ -497,6 +507,7 @@ function createApp(db, { disableRateLimit = false } = {}) {
                 yearMin,
                 yearMax,
                 excludeItemIds,
+                watchlistItemIds,
               });
               res.json(catalog);
             } catch (e) {
@@ -506,6 +517,124 @@ function createApp(db, { disableRateLimit = false } = {}) {
         );
       }
     );
+  });
+
+  // ── Watchlist GET ─────────────────────────────────────────────────────────
+  app.get('/watchlist', authenticateToken, (req, res) => {
+    db.all(
+      'SELECT * FROM watchlist_items WHERE user_id = ? ORDER BY added_at DESC',
+      [req.user.id],
+      (err, rows) => {
+        if (err) return res.status(500).json({ error: 'Database error' });
+        res.json({ items: rows || [] });
+      }
+    );
+  });
+
+  // ── Watchlist DELETE ──────────────────────────────────────────────────────
+  app.delete('/watchlist/:item_id', authenticateToken, (req, res) => {
+    const itemId = decodeURIComponent(req.params.item_id);
+    db.run(
+      'DELETE FROM watchlist_items WHERE user_id = ? AND item_id = ?',
+      [req.user.id, itemId],
+      function (err) {
+        if (err) return res.status(500).json({ error: 'Database error' });
+        res.json({ success: true });
+      }
+    );
+  });
+
+  // ── Letterboxd CSV preview ────────────────────────────────────────────────
+  // Parses raw CSV text, detects type (watched vs watchlist), returns item list.
+  app.post('/import/letterboxd/preview', authenticateToken, (req, res) => {
+    const { csvText } = req.body || {};
+    if (!csvText || typeof csvText !== 'string') {
+      return res.status(400).json({ error: 'csvText required' });
+    }
+
+    function parseCSVRow(line) {
+      const fields = [];
+      let field = '';
+      let inQuotes = false;
+      for (let i = 0; i < line.length; i++) {
+        const ch = line[i];
+        if (ch === '"') {
+          if (inQuotes && line[i + 1] === '"') { field += '"'; i++; }
+          else { inQuotes = !inQuotes; }
+        } else if (ch === ',' && !inQuotes) {
+          fields.push(field.trim());
+          field = '';
+        } else {
+          field += ch;
+        }
+      }
+      fields.push(field.trim());
+      return fields;
+    }
+
+    const lines = csvText.replace(/\r\n/g, '\n').replace(/\r/g, '\n').trim().split('\n');
+    if (lines.length < 2) return res.status(400).json({ error: 'CSV appears empty' });
+
+    const headers = parseCSVRow(lines[0]).map((h) => h.toLowerCase().replace(/"/g, '').trim());
+    const nameIdx = headers.indexOf('name');
+    const yearIdx = headers.indexOf('year');
+    if (nameIdx === -1 || yearIdx === -1) {
+      return res.status(400).json({ error: 'CSV must have Name and Year columns' });
+    }
+
+    // Detect type: watched.csv has a Rating column, watchlist.csv does not
+    const importType = headers.includes('rating') ? 'watched' : 'watchlist';
+
+    const items = lines
+      .slice(1)
+      .filter((l) => l.trim())
+      .map((line) => {
+        const cols = parseCSVRow(line);
+        const name = (cols[nameIdx] || '').replace(/^"|"$/g, '').trim();
+        const year = parseInt(cols[yearIdx] || '0', 10);
+        return name && year ? { name, year } : null;
+      })
+      .filter(Boolean);
+
+    res.json({ importType, count: items.length, items });
+  });
+
+  // ── Letterboxd batch import ───────────────────────────────────────────────
+  // Accepts up to 50 items per call. Client loops until all items are processed.
+  app.post('/import/letterboxd', authenticateToken, async (req, res) => {
+    const { items, importType } = req.body || {};
+    if (!Array.isArray(items) || items.length === 0) {
+      return res.status(400).json({ error: 'items array required' });
+    }
+    if (!['watched', 'watchlist'].includes(importType)) {
+      return res.status(400).json({ error: 'importType must be watched or watchlist' });
+    }
+    const batch = items.slice(0, 50);
+    const table = importType === 'watched' ? 'watched_items' : 'watchlist_items';
+    const timeCol = importType === 'watched' ? 'watched_at' : 'added_at';
+
+    let matched = 0;
+    let notFound = 0;
+
+    for (const { name, year } of batch) {
+      if (!name || !year) { notFound++; continue; }
+      const result = await searchTitleOnTmdb(name, year);
+      if (!result) { notFound++; continue; }
+
+      await new Promise((resolve) =>
+        db.run(
+          `INSERT OR IGNORE INTO ${table} (user_id, item_id, media_type, title, poster_url, ${timeCol}) VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP)`,
+          [req.user.id, result.itemId, result.mediaType, result.title, result.posterUrl],
+          () => resolve()
+        )
+      );
+      matched++;
+
+      // Throttle to respect TMDB rate limits (~8 req/sec)
+      await new Promise((r) => setTimeout(r, 125));
+    }
+
+    res.json({ matched, notFound, processed: batch.length });
   });
 
   return app;
