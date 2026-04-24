@@ -109,18 +109,30 @@ struct ContentView: View {
 
 // MARK: - Loading
 
-struct LoadingView: View {
+/// Reusable inline StreamScout brand header (logo + name side by side)
+struct StreamScoutTitle: View {
+    var size: CGFloat = 28
+    var logoSize: CGFloat = 32
+
     var body: some View {
-        VStack(spacing: 16) {
+        HStack(spacing: 10) {
             Image("StreamScoreLogo")
                 .resizable()
                 .scaledToFit()
-                .frame(width: 100, height: 100)
-                .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
-                .shadow(color: .mkAccent.opacity(0.4), radius: 12, x: 0, y: 4)
+                .frame(width: logoSize, height: logoSize)
+                .clipShape(RoundedRectangle(cornerRadius: logoSize * 0.22, style: .continuous))
+                .shadow(color: .mkAccent.opacity(0.4), radius: 6, x: 0, y: 3)
             Text("StreamScout")
-                .font(.system(size: 30, weight: .bold, design: .rounded))
+                .font(.system(size: size, weight: .bold, design: .rounded))
                 .foregroundStyle(LinearGradient(colors: [.mkAccent, .mkAccentAlt], startPoint: .leading, endPoint: .trailing))
+        }
+    }
+}
+
+struct LoadingView: View {
+    var body: some View {
+        VStack(spacing: 16) {
+            StreamScoutTitle(size: 30, logoSize: 34)
             ProgressView().tint(.mkAccent).padding(.top, 8)
         }
     }
@@ -153,18 +165,8 @@ struct AuthView: View {
             VStack(spacing: 0) {
                 // Hero
                 VStack(spacing: 10) {
-                    Image("StreamScoreLogo")
-                        .resizable()
-                        .scaledToFit()
-                        .frame(width: 90, height: 90)
-                        .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
-                        .shadow(color: .mkAccent.opacity(0.45), radius: 14, x: 0, y: 6)
+                    StreamScoutTitle(size: 34, logoSize: 40)
                         .padding(.top, 60)
-                    Text("StreamScout")
-                        .font(.system(size: 34, weight: .bold, design: .rounded))
-                        .foregroundStyle(
-                            LinearGradient(colors: [.mkAccent, .mkAccentAlt], startPoint: .leading, endPoint: .trailing)
-                        )
                     Text("Your streaming catalog, unified.")
                         .font(.subheadline)
                         .foregroundColor(.mkMuted)
@@ -419,11 +421,29 @@ struct PlatformsView: View {
             } else {
                 ScrollView {
                     VStack(spacing: 20) {
-                        Text("Select every service you subscribe to. StreamScout will show titles available across your chosen platforms.")
-                            .font(.subheadline)
-                            .foregroundColor(.mkMuted)
+                        VStack(spacing: 4) {
+                            HStack(spacing: 4) {
+                                Text("Select every service you subscribe to.")
+                                    .font(.subheadline)
+                                    .foregroundColor(.mkMuted)
+                                    .multilineTextAlignment(.center)
+                            }
+                            HStack(spacing: 5) {
+                                Image("StreamScoreLogo")
+                                    .resizable()
+                                    .scaledToFit()
+                                    .frame(width: 16, height: 16)
+                                    .clipShape(RoundedRectangle(cornerRadius: 4, style: .continuous))
+                                Text("StreamScout")
+                                    .font(.subheadline.weight(.semibold))
+                                    .foregroundColor(.mkAccent)
+                                Text("will show titles available across your chosen platforms.")
+                                    .font(.subheadline)
+                                    .foregroundColor(.mkMuted)
+                            }
                             .multilineTextAlignment(.center)
-                            .padding(.horizontal, 16)
+                        }
+                        .padding(.horizontal, 16)
 
                         LazyVGrid(columns: columns, spacing: 12) {
                             ForEach(allPlatforms) { p in
