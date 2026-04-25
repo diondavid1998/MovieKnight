@@ -908,7 +908,7 @@ function App() {
       const response = await apiFetch('/import/letterboxd/preview', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ csvText: text }),
+        body: JSON.stringify({ csvText: text, fileName: file.name }),
       });
       if (!response.ok) throw new Error('Preview failed');
       const data = await parseResponseBody(response);

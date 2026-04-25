@@ -16,7 +16,7 @@ const {
   ensureScopeSynced,
   readCachedCatalog,
 } = require('./catalogCache');
-const { fetchTitleWithCredits, searchTitleOnTmdb } = require('./movieService');
+const { fetchTitleWithCredits, searchTitleOnTmdb, fetchTitlesByPerson } = require('./movieService');
 
 const JWT_SECRET = process.env.JWT_SECRET || 'test-secret-key';
 const TMDB_IMAGE_BASE = 'https://image.tmdb.org/t/p';
@@ -317,6 +317,19 @@ function createApp(db, { disableRateLimit = false } = {}) {
     }
   });
 
+  // ── Person filmography on streaming ──────────────────────────────────────
+  app.get('/titles/person/:personId', authenticateToken, async (req, res) => {
+    const personId = parseInt(req.params.personId, 10);
+    if (!personId) return res.status(400).json({ error: 'Invalid personId' });
+    const platforms = req.user?.platforms || [];
+    try {
+      const items = await fetchTitlesByPerson(personId, platforms);
+      res.json({ items });
+    } catch (e) {
+      res.status(500).json({ error: 'Failed to fetch person titles', details: e.message });
+    }
+  });
+
   // ── Watched list GET ──────────────────────────────────────────────────────
   app.get('/watched', authenticateToken, (req, res) => {
     db.all(
@@ -547,7 +560,7 @@ function createApp(db, { disableRateLimit = false } = {}) {
   // ── Letterboxd CSV preview ────────────────────────────────────────────────
   // Parses raw CSV text, detects type (watched vs watchlist), returns item list.
   app.post('/import/letterboxd/preview', authenticateToken, (req, res) => {
-    const { csvText } = req.body || {};
+    const { csvText, fileName } = req.body || {};
     if (!csvText || typeof csvText !== 'string') {
       return res.status(400).json({ error: 'csvText required' });
     }
@@ -582,8 +595,17 @@ function createApp(db, { disableRateLimit = false } = {}) {
       return res.status(400).json({ error: 'CSV must have Name and Year columns' });
     }
 
-    // Detect type: watched.csv has a Rating column, watchlist.csv does not
-    const importType = headers.includes('rating') ? 'watched' : 'watchlist';
+    // Detect type: use filename as primary signal since watched.csv and
+    // watchlist.csv share identical column headers. Fall back to rating column.
+    const lowerFileName = (fileName || '').toLowerCase();
+    let importType;
+    if (lowerFileName.includes('watchlist')) {
+      importType = 'watchlist';
+    } else if (lowerFileName.includes('watched') || lowerFileName.includes('diary')) {
+      importType = 'watched';
+    } else {
+      importType = headers.includes('rating') ? 'watched' : 'watchlist';
+    }
 
     const items = lines
       .slice(1)
