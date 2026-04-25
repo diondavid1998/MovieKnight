@@ -8,6 +8,8 @@ const AUTH_TOKEN_KEY = 'movieKnight.authToken';
 const AUTH_USERNAME_KEY = 'movieKnight.username';
 const BYPASS_MODE_KEY = 'movieKnight.bypassMode';
 const PAGE_SIZE = 24;
+const YEAR_RANGE_MIN = 1900;
+const YEAR_RANGE_MAX = new Date().getFullYear();
 
 const styles = {
   container: {
@@ -661,7 +663,9 @@ const styles = {
   avatarCircle: { width: 80, height: 80, borderRadius: 999, background: 'rgba(233,69,96,0.15)', border: '2px solid rgba(233,69,96,0.3)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 32, color: '#e94560', overflow: 'hidden', flexShrink: 0 },
   // ── Year range inputs ─────────────────────────────────────────────────────
   yearRangeRow: { display: 'flex', gap: 10, alignItems: 'center' },
-  yearInput: { flex: 1, padding: '9px 12px', borderRadius: 10, border: '1px solid rgba(255,255,255,0.1)', background: 'rgba(255,255,255,0.05)', color: '#eef0f7', fontFamily: 'inherit', fontSize: 14, outline: 'none', boxSizing: 'border-box' },
+  yearRangeWrap: { padding: '4px 0 8px' },
+  yearRangeLabels: { display: 'flex', justifyContent: 'space-between', fontSize: 13, color: '#c0c8d8', marginBottom: 10, fontVariantNumeric: 'tabular-nums' },
+  yearRangeTrackWrap: { position: 'relative', height: 20, display: 'flex', alignItems: 'center' },
   // ── Clickable movie card ──────────────────────────────────────────────────
   movieCardClickable: { cursor: 'pointer' },
   // ── Filter panel (controlled, replaces <details>) ─────────────────────────
@@ -734,8 +738,8 @@ function App() {
   const [showIosTip, setShowIosTip] = useState(false);
   const [platformSaveKey, setPlatformSaveKey] = useState(0);
   // ── New feature state ──────────────────────────────────────────────────────
-  const [yearMin, setYearMin] = useState('');
-  const [yearMax, setYearMax] = useState('');
+  const [yearMin, setYearMin] = useState(YEAR_RANGE_MIN);
+  const [yearMax, setYearMax] = useState(YEAR_RANGE_MAX);
   const [watchedIds, setWatchedIds] = useState(new Set());
   const [hideWatched, setHideWatched] = useState(false);
   const [selectedMovie, setSelectedMovie] = useState(null);
@@ -759,6 +763,7 @@ function App() {
   const [resetCode, setResetCode] = useState('');
   const [resetNewPass, setResetNewPass] = useState('');
   const [openFilters, setOpenFilters] = useState({ service: false, language: false, genre: false, year: false });
+  const [catalogStatus, setCatalogStatus] = useState(null);
   const abortRef = useRef(null);
 
   // buildApiErrorMessage imported from utils.js
@@ -783,8 +788,8 @@ function App() {
     setServiceFilters([]);
     setLanguageFilters([]);
     setCatalogPage(1);
-    setYearMin('');
-    setYearMax('');
+    setYearMin(YEAR_RANGE_MIN);
+    setYearMax(YEAR_RANGE_MAX);
     setWatchedIds(new Set());
     setHideWatched(false);
     setSelectedMovie(null);
@@ -992,6 +997,15 @@ function App() {
     setLoadingDetails(false);
   };
 
+  const fetchCatalogStatus = async () => {
+    try {
+      const response = await apiFetch('/catalog-status');
+      if (!response.ok) return;
+      const data = await parseResponseBody(response);
+      setCatalogStatus(data);
+    } catch { /* silent */ }
+  };
+
   const fetchAccount = async () => {
     try {
       const response = await apiFetch('/account');
@@ -1152,8 +1166,8 @@ function App() {
         query.set('genreFilters', genreFilters.join(','));
       }
 
-      if (yearMin) query.set('yearMin', yearMin);
-      if (yearMax) query.set('yearMax', yearMax);
+      if (yearMin !== YEAR_RANGE_MIN) query.set('yearMin', yearMin);
+      if (yearMax !== YEAR_RANGE_MAX) query.set('yearMax', yearMax);
       if (hideWatched) query.set('hideWatched', 'true');
       if (watchlistOnly && watchlistIds.size > 0) query.set('watchlistOnly', 'true');
 
@@ -1173,7 +1187,7 @@ function App() {
       setCatalogMeta(data.meta || null);
       if (!items.length) {
         setInfo(
-          serviceFilters.length || languageFilters.length || genreFilters.length || yearMin || yearMax
+          serviceFilters.length || languageFilters.length || genreFilters.length || yearMin !== YEAR_RANGE_MIN || yearMax !== YEAR_RANGE_MAX
             ? 'No titles matched the current catalog filters.'
             : 'No titles were returned for the platforms currently selected.'
         );
@@ -1380,6 +1394,7 @@ function App() {
   useEffect(() => {
     if (!showSettings) return;
     if (settingsTab === 'profile') fetchAccount();
+    if (settingsTab === 'services') fetchCatalogStatus();
     if (settingsTab === 'watchlist') { loadWatched(); loadWatchlist(); }
   }, [settingsTab, showSettings]); // eslint-disable-line
 
@@ -1796,6 +1811,19 @@ function App() {
                     {isFirstSetup ? 'Save and Continue →' : 'Save Changes'}
                   </button>
                 </div>
+                {!isFirstSetup && catalogStatus && (
+                  <div style={{ marginTop: 14, padding: '10px 14px', background: 'rgba(255,255,255,0.03)', borderRadius: 10, border: '1px solid rgba(255,255,255,0.07)', fontSize: 12, color: '#6e7a93' }}>
+                    🗄 Catalog last refreshed:{' '}
+                    <span style={{ color: '#c0c8d8' }}>
+                      {catalogStatus.lastSyncedAt
+                        ? new Date(catalogStatus.lastSyncedAt).toLocaleString()
+                        : 'Not yet synced'}
+                    </span>
+                    {catalogStatus.itemCount > 0 && (
+                      <span style={{ marginLeft: 8, color: '#8a93a8' }}>· {catalogStatus.itemCount.toLocaleString()} titles</span>
+                    )}
+                  </div>
+                )}
               </>
             )}
 
@@ -2092,24 +2120,44 @@ function App() {
               )}
 
               {renderFilterPanel('year', 'Year Range',
-                <span style={(yearMin || yearMax) ? { color: '#ff8fa3' } : {}}>
-                  {yearMin || yearMax ? `${yearMin || '…'} – ${yearMax || '…'}` : 'All'}
+                <span style={(yearMin !== YEAR_RANGE_MIN || yearMax !== YEAR_RANGE_MAX) ? { color: '#ff8fa3' } : {}}>
+                  {(yearMin !== YEAR_RANGE_MIN || yearMax !== YEAR_RANGE_MAX) ? `${yearMin} – ${yearMax}` : 'All'}
                 </span>,
-                <div style={styles.yearRangeRow}>
-                  <input type="number" placeholder="From year (e.g. 1990)" style={styles.yearInput}
-                    value={yearMin} min="1900" max="2099"
-                    onChange={(e) => { setYearMin(e.target.value); setCatalogPage(1); }} />
-                  <span style={{ color: '#6e7a93', flexShrink: 0 }}>—</span>
-                  <input type="number" placeholder="To year (e.g. 2024)" style={styles.yearInput}
-                    value={yearMax} min="1900" max="2099"
-                    onChange={(e) => { setYearMax(e.target.value); setCatalogPage(1); }} />
-                  {(yearMin || yearMax) && (
-                    <button type="button" onClick={() => { setYearMin(''); setYearMax(''); setCatalogPage(1); }}
-                      style={{ background: 'none', border: 'none', color: '#e94560', cursor: 'pointer', fontFamily: 'inherit', fontSize: 12, flexShrink: 0 }}>
-                      Clear
-                    </button>
-                  )}
-                </div>
+                (() => {
+                  const leftPct = ((yearMin - YEAR_RANGE_MIN) / (YEAR_RANGE_MAX - YEAR_RANGE_MIN)) * 100;
+                  const rightPct = ((yearMax - YEAR_RANGE_MIN) / (YEAR_RANGE_MAX - YEAR_RANGE_MIN)) * 100;
+                  const trackBg = `linear-gradient(to right, rgba(255,255,255,0.08) ${leftPct}%, #8b82ff ${leftPct}%, #8b82ff ${rightPct}%, rgba(255,255,255,0.08) ${rightPct}%)`;
+                  return (
+                    <div style={styles.yearRangeWrap}>
+                      <div style={styles.yearRangeLabels}>
+                        <span>{yearMin}</span>
+                        <span>{yearMax}</span>
+                      </div>
+                      <div style={styles.yearRangeTrackWrap}>
+                        <input type="range" className="year-range-input" min={YEAR_RANGE_MIN} max={YEAR_RANGE_MAX} step={1}
+                          value={yearMin}
+                          style={{ background: trackBg }}
+                          onChange={(e) => {
+                            const v = Math.min(Number(e.target.value), yearMax);
+                            setYearMin(v); setCatalogPage(1);
+                          }} />
+                        <input type="range" className="year-range-input" min={YEAR_RANGE_MIN} max={YEAR_RANGE_MAX} step={1}
+                          value={yearMax}
+                          style={{ background: trackBg }}
+                          onChange={(e) => {
+                            const v = Math.max(Number(e.target.value), yearMin);
+                            setYearMax(v); setCatalogPage(1);
+                          }} />
+                      </div>
+                      {(yearMin !== YEAR_RANGE_MIN || yearMax !== YEAR_RANGE_MAX) && (
+                        <button type="button" onClick={() => { setYearMin(YEAR_RANGE_MIN); setYearMax(YEAR_RANGE_MAX); setCatalogPage(1); }}
+                          style={{ background: 'none', border: 'none', color: '#e94560', cursor: 'pointer', fontFamily: 'inherit', fontSize: 12, marginTop: 6, padding: 0 }}>
+                          Clear
+                        </button>
+                      )}
+                    </div>
+                  );
+                })()
               )}
             </div>
 

@@ -15,6 +15,7 @@ const nodemailer = require('nodemailer');
 const {
   ensureScopeSynced,
   readCachedCatalog,
+  buildScopeKey,
 } = require('./catalogCache');
 const { fetchTitleWithCredits, searchTitleOnTmdb, fetchTitlesByPerson } = require('./movieService');
 
@@ -328,6 +329,27 @@ function createApp(db, { disableRateLimit = false } = {}) {
     } catch (e) {
       res.status(500).json({ error: 'Failed to fetch person titles', details: e.message });
     }
+  });
+
+  // ── Catalog status ────────────────────────────────────────────────────────
+  app.get('/catalog-status', authenticateToken, (req, res) => {
+    db.get('SELECT platforms FROM users WHERE id = ?', [req.user.id], (err, row) => {
+      if (err || !row) return res.status(500).json({ error: 'Database error' });
+      let platforms = [];
+      try { platforms = JSON.parse(row.platforms || '[]'); } catch { /* ignore */ }
+      const scopeKey = buildScopeKey(platforms);
+      db.get(
+        'SELECT last_synced_at, item_count FROM catalog_cache_state WHERE scope_key = ?',
+        [scopeKey],
+        (err2, state) => {
+          if (err2) return res.status(500).json({ error: 'Database error' });
+          res.json({
+            lastSyncedAt: state?.last_synced_at || null,
+            itemCount: state?.item_count || 0,
+          });
+        }
+      );
+    });
   });
 
   // ── Watched list GET ──────────────────────────────────────────────────────
