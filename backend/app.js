@@ -319,16 +319,20 @@ function createApp(db, { disableRateLimit = false } = {}) {
   });
 
   // ── Person filmography on streaming ──────────────────────────────────────
-  app.get('/titles/person/:personId', authenticateToken, async (req, res) => {
+  app.get('/titles/person/:personId', authenticateToken, (req, res) => {
     const personId = parseInt(req.params.personId, 10);
     if (!personId) return res.status(400).json({ error: 'Invalid personId' });
-    const platforms = req.user?.platforms || [];
-    try {
-      const items = await fetchTitlesByPerson(personId, platforms);
-      res.json({ items });
-    } catch (e) {
-      res.status(500).json({ error: 'Failed to fetch person titles', details: e.message });
-    }
+    db.get('SELECT platforms FROM users WHERE id = ?', [req.user.id], async (err, row) => {
+      if (err || !row) return res.status(500).json({ error: 'Database error' });
+      let platforms = [];
+      try { platforms = JSON.parse(row.platforms || '[]'); } catch { /* ignore */ }
+      try {
+        const items = await fetchTitlesByPerson(personId, platforms);
+        res.json({ items });
+      } catch (e) {
+        res.status(500).json({ error: 'Failed to fetch person titles', details: e.message });
+      }
+    });
   });
 
   // ── Catalog status ────────────────────────────────────────────────────────

@@ -762,6 +762,7 @@ function App() {
   const [lbxDone, setLbxDone] = useState('');
   const [resetStep, setResetStep] = useState(0); // 0: off, 1: email, 2: code, 3: done
   const [resetEmail, setResetEmail] = useState('');
+  const [registerEmail, setRegisterEmail] = useState('');
   const [resetCode, setResetCode] = useState('');
   const [resetNewPass, setResetNewPass] = useState('');
   const [openFilters, setOpenFilters] = useState({ service: false, language: false, genre: false, year: false });
@@ -799,6 +800,10 @@ function App() {
     setSettingsTab('services');
     setAccountData({ username: '', email: '', profilePic: null });
     setWatchlistItems([]);
+    setWatchlistOnlyItems([]);
+    setWatchlistIds(new Set());
+    setWatchlistOnly(false);
+    setRegisterEmail('');
     setResetStep(0);
     setOpenFilters({ service: false, language: false, genre: false, year: false });
   };
@@ -1202,7 +1207,7 @@ function App() {
     } finally {
       setLoadingMovies(false);
     }
-  }, [isBypassMode, mediaTypeFilter, sortBy, catalogPage, serviceFilters, languageFilters, genreFilters, yearMin, yearMax, hideWatched, token, platformSaveKey]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [isBypassMode, mediaTypeFilter, sortBy, catalogPage, serviceFilters, languageFilters, genreFilters, yearMin, yearMax, hideWatched, watchlistOnly, watchlistIds, token, platformSaveKey]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const formatMediaType = (value) => {
     if (value === 'documentary') {
@@ -1365,7 +1370,7 @@ function App() {
         setUsername(storedUsername || '');
         setSelected(Array.isArray(data.platforms) ? data.platforms : []);
         setLanguages(Array.isArray(data.languages) ? data.languages : []);
-        setPage('platforms');
+        setPage(Array.isArray(data.platforms) && data.platforms.length > 0 ? 'movies' : 'platforms');
         setInfo(`Signed in as ${storedUsername || 'your account'}.`);
       } catch (err) {
         setError(`Network error: ${err.message}. Make sure the backend is running at ${API_BASE}.`);
@@ -1459,7 +1464,7 @@ function App() {
         body: JSON.stringify({
           username: cleanUsername,
           password,
-          ...(authMode === 'register' && resetEmail ? { email: resetEmail } : {}),
+          ...(authMode === 'register' && registerEmail ? { email: registerEmail } : {}),
         }),
       });
       const data = await parseResponseBody(response);
@@ -1688,7 +1693,7 @@ function App() {
               {isRegister && (
                 <input
                   style={styles.input} className="mk-input" type="email" placeholder="Email (optional — for password reset)"
-                  value={resetEmail} onChange={(e) => setResetEmail(e.target.value)} autoComplete="email"
+                  value={registerEmail} onChange={(e) => setRegisterEmail(e.target.value)} autoComplete="email"
                 />
               )}
               <input

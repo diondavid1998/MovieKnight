@@ -546,13 +546,16 @@ struct PlatformsView: View {
         let languages = Array(selectedLangs)
         app.savePlatforms(platforms)
         app.saveLanguages(languages)
-        _ = try? await APIService.shared.put(
-            "/platforms",
-            body: ["platforms": platforms, "languages": languages],
-            token: app.token
-        ) as GenericResponse
+        do {
+            _ = try await APIService.shared.put(
+                "/platforms",
+                body: ["platforms": platforms, "languages": languages],
+                token: app.token
+            ) as GenericResponse
+        } catch {
+            errorMsg = "Couldn't save your services. Changes saved locally — try again later."
+        }
         isSaving = false
-        // If shown as a sheet (editing), dismiss it. If onboarding flow, navigate to catalog.
         if app.page == .platforms {
             app.page = .catalog
         } else {
@@ -904,7 +907,7 @@ struct CatalogView: View {
         if !languageFilters.isEmpty       { params["languageFilters"] = languageFilters.joined(separator: ",") }
         if !yearMin.isEmpty               { params["yearMin"] = yearMin }
         if !yearMax.isEmpty               { params["yearMax"] = yearMax }
-        if hideWatched && !app.watchedIds.isEmpty { params["hideWatched"] = "1" }
+        if hideWatched && !app.watchedIds.isEmpty { params["hideWatched"] = "true" }
         if watchlistOnly && !app.watchlistIds.isEmpty { params["watchlistOnly"] = "true" }
         do {
             let resp: CatalogResponse = try await APIService.shared.get("/movies", params: params, token: app.token)
