@@ -363,7 +363,15 @@ function createApp(db, { disableRateLimit = false } = {}) {
       [req.user.id],
       (err, rows) => {
         if (err) return res.status(500).json({ error: 'Database error' });
-        res.json({ items: rows || [] });
+        res.json({
+          items: (rows || []).map((r) => ({
+            itemId: r.item_id,
+            mediaType: r.media_type,
+            title: r.title,
+            posterUrl: r.poster_url,
+            watchedAt: r.watched_at,
+          })),
+        });
       }
     );
   });
@@ -565,7 +573,15 @@ function createApp(db, { disableRateLimit = false } = {}) {
       [req.user.id],
       (err, rows) => {
         if (err) return res.status(500).json({ error: 'Database error' });
-        res.json({ items: rows || [] });
+        res.json({
+          items: (rows || []).map((r) => ({
+            itemId: r.item_id,
+            mediaType: r.media_type,
+            title: r.title,
+            posterUrl: r.poster_url,
+            addedAt: r.added_at,
+          })),
+        });
       }
     );
   });

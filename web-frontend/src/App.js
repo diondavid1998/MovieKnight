@@ -892,7 +892,7 @@ function App() {
       if (!response.ok) return;
       const data = await parseResponseBody(response);
       const items = Array.isArray(data.items) ? data.items : [];
-      setWatchedIds(new Set(items.map((item) => item.item_id)));
+      setWatchedIds(new Set(items.map((item) => item.itemId)));
       setWatchlistItems(items);
     } catch { /* silent */ }
   }, [token]); // eslint-disable-line
@@ -905,14 +905,14 @@ function App() {
       const data = await parseResponseBody(response);
       const items = Array.isArray(data.items) ? data.items : [];
       setWatchlistOnlyItems(items);
-      setWatchlistIds(new Set(items.map((item) => item.item_id)));
+      setWatchlistIds(new Set(items.map((item) => item.itemId)));
     } catch { /* silent */ }
   };
 
   const removeFromWatchlist = async (itemId) => {
     try {
       await apiFetch(`/watchlist/${encodeURIComponent(itemId)}`, { method: 'DELETE' });
-      setWatchlistOnlyItems((prev) => prev.filter((i) => i.item_id !== itemId));
+      setWatchlistOnlyItems((prev) => prev.filter((i) => i.itemId !== itemId));
       setWatchlistIds((prev) => { const next = new Set(prev); next.delete(itemId); return next; });
     } catch { /* silent */ }
   };
@@ -984,7 +984,7 @@ function App() {
       try {
         await apiFetch(`/watched/${encodeURIComponent(itemId)}`, { method: 'DELETE' });
         setWatchedIds((prev) => { const next = new Set(prev); next.delete(itemId); return next; });
-        setWatchlistItems((prev) => prev.filter((item) => item.item_id !== itemId));
+        setWatchlistItems((prev) => prev.filter((item) => item.itemId !== itemId));
       } catch { /* silent */ }
     } else {
       try {
@@ -994,7 +994,7 @@ function App() {
           body: JSON.stringify({ itemId, mediaType: movie.mediaType, title: movie.title, posterUrl: movie.posterUrl }),
         });
         setWatchedIds((prev) => new Set([...prev, itemId]));
-        setWatchlistItems((prev) => [{ item_id: itemId, media_type: movie.mediaType, title: movie.title, poster_url: movie.posterUrl, watched_at: new Date().toISOString() }, ...prev]);
+        setWatchlistItems((prev) => [{ itemId, mediaType: movie.mediaType, title: movie.title, posterUrl: movie.posterUrl, watchedAt: new Date().toISOString() }, ...prev]);
       } catch { /* silent */ }
     }
   };
@@ -1937,17 +1937,17 @@ function App() {
                 {watchlistItems.length === 0
                   ? <p style={{ ...styles.emptyState, marginBottom: 16 }}>No watched content yet.</p>
                   : watchlistItems.map((item) => (
-                    <div key={item.item_id} style={styles.watchlistRow}>
-                      {item.poster_url
-                        ? <img src={item.poster_url} alt={item.title} style={styles.watchlistPoster} />
+                    <div key={item.itemId} style={styles.watchlistRow}>
+                      {item.posterUrl
+                        ? <img src={item.posterUrl} alt={item.title} style={styles.watchlistPoster} />
                         : <div style={{ ...styles.watchlistPoster, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 18 }}>🎬</div>}
                       <div style={{ flex: 1, minWidth: 0 }}>
-                        <div style={{ fontWeight: 700, fontSize: 14, color: '#eef0f7', marginBottom: 2 }}>{item.title || item.item_id}</div>
-                        <div style={{ fontSize: 11, color: '#6e7a93', textTransform: 'uppercase', letterSpacing: '0.06em' }}>{item.media_type || ''}</div>
+                        <div style={{ fontWeight: 700, fontSize: 14, color: '#eef0f7', marginBottom: 2 }}>{item.title || item.itemId}</div>
+                        <div style={{ fontSize: 11, color: '#6e7a93', textTransform: 'uppercase', letterSpacing: '0.06em' }}>{item.mediaType || ''}</div>
                       </div>
                       <button type="button"
                         style={{ background: 'none', border: 'none', color: '#e94560', cursor: 'pointer', fontFamily: 'inherit', fontSize: 13, fontWeight: 600, padding: '6px 10px' }}
-                        onClick={() => toggleWatched({ id: item.item_id, mediaType: item.media_type, title: item.title, posterUrl: item.poster_url })}>
+                        onClick={() => toggleWatched({ id: item.itemId, mediaType: item.mediaType, title: item.title, posterUrl: item.posterUrl })}>
                         Remove
                       </button>
                     </div>
@@ -1960,17 +1960,17 @@ function App() {
                 {watchlistOnlyItems.length === 0
                   ? <p style={styles.emptyState}>No watchlist items. Import from Letterboxd in the Profile tab.</p>
                   : watchlistOnlyItems.map((item) => (
-                    <div key={item.item_id} style={styles.watchlistRow}>
-                      {item.poster_url
-                        ? <img src={item.poster_url} alt={item.title} style={styles.watchlistPoster} />
+                    <div key={item.itemId} style={styles.watchlistRow}>
+                      {item.posterUrl
+                        ? <img src={item.posterUrl} alt={item.title} style={styles.watchlistPoster} />
                         : <div style={{ ...styles.watchlistPoster, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 18 }}>🔖</div>}
                       <div style={{ flex: 1, minWidth: 0 }}>
-                        <div style={{ fontWeight: 700, fontSize: 14, color: '#eef0f7', marginBottom: 2 }}>{item.title || item.item_id}</div>
-                        <div style={{ fontSize: 11, color: '#6e7a93', textTransform: 'uppercase', letterSpacing: '0.06em' }}>{item.media_type || ''}</div>
+                        <div style={{ fontWeight: 700, fontSize: 14, color: '#eef0f7', marginBottom: 2 }}>{item.title || item.itemId}</div>
+                        <div style={{ fontSize: 11, color: '#6e7a93', textTransform: 'uppercase', letterSpacing: '0.06em' }}>{item.mediaType || ''}</div>
                       </div>
                       <button type="button"
                         style={{ background: 'none', border: 'none', color: '#e94560', cursor: 'pointer', fontFamily: 'inherit', fontSize: 13, fontWeight: 600, padding: '6px 10px' }}
-                        onClick={() => removeFromWatchlist(item.item_id)}>
+                        onClick={() => removeFromWatchlist(item.itemId)}>
                         Remove
                       </button>
                     </div>
