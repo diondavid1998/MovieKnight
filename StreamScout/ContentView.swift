@@ -713,7 +713,7 @@ struct CatalogView: View {
             startPollingIfNeeded()
         }
         .onChange(of: showSettingsView) { open in
-            if !open { Task { await fetch() } }
+            if !open { page = 1; Task { await fetch() } }
         }
         .onDisappear { pollingTask?.cancel() }
     }
@@ -1006,6 +1006,8 @@ struct MovieCardView: View {
                 )
                 app.setWatched(movie.id, watched: true)
             }
+        } catch let err as APIError {
+            if case .unauthorized = err { app.logout() }
         } catch { }
         isTogglingWatched = false
     }
@@ -1863,6 +1865,8 @@ struct DetailSheet: View {
                 )
                 app.setWatched(movie.id, watched: true)
             }
+        } catch let err as APIError {
+            if case .unauthorized = err { app.logout() }
         } catch { }
         isTogglingWatched = false
     }
@@ -2102,11 +2106,10 @@ struct ServicesTabView: View {
                 LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 12), count: 3), spacing: 12) {
                     ForEach(allPlatforms) { platform in
                         PlatformToggle(platform: platform, isSelected: app.selectedPlatforms.contains(platform.key)) {
-                            if app.selectedPlatforms.contains(platform.key) {
-                                app.selectedPlatforms.removeAll { $0 == platform.key }
-                            } else {
-                                app.selectedPlatforms.append(platform.key)
-                            }
+                            let updated = app.selectedPlatforms.contains(platform.key)
+                                ? app.selectedPlatforms.filter { $0 != platform.key }
+                                : app.selectedPlatforms + [platform.key]
+                            app.savePlatforms(updated)
                         }
                     }
                 }
@@ -2116,11 +2119,10 @@ struct ServicesTabView: View {
                 LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 12), count: 3), spacing: 12) {
                     ForEach(allLanguages) { lang in
                         LanguageToggle(language: lang, isSelected: app.selectedLanguages.contains(lang.key)) {
-                            if app.selectedLanguages.contains(lang.key) {
-                                app.selectedLanguages.removeAll { $0 == lang.key }
-                            } else {
-                                app.selectedLanguages.append(lang.key)
-                            }
+                            let updated = app.selectedLanguages.contains(lang.key)
+                                ? app.selectedLanguages.filter { $0 != lang.key }
+                                : app.selectedLanguages + [lang.key]
+                            app.saveLanguages(updated)
                         }
                     }
                 }

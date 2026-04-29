@@ -729,6 +729,9 @@ function App() {
   const [loadingAuth, setLoadingAuth] = useState(false);
   const [loadingMovies, setLoadingMovies] = useState(false);
   const [loadingSession, setLoadingSession] = useState(true);
+  const [loadingPlatforms, setLoadingPlatforms] = useState(false);
+  const [loadingProfile, setLoadingProfile] = useState(false);
+  const [loadingReset, setLoadingReset] = useState(false);
   const [mediaTypeFilter, setMediaTypeFilter] = useState('all');
   const [sortBy, setSortBy] = useState('popularity');
   const [isBypassMode, setIsBypassMode] = useState(false);
@@ -804,6 +807,9 @@ function App() {
     setWatchlistIds(new Set());
     setWatchlistOnly(false);
     setRegisterEmail('');
+    setGenreFilters([]);
+    setSortBy('popularity');
+    setMediaTypeFilter('all');
     setResetStep(0);
     setOpenFilters({ service: false, language: false, genre: false, year: false });
   };
@@ -1032,6 +1038,7 @@ function App() {
     if (editEmail !== accountData.email) updates.email = editEmail;
     if (editPassword) updates.password = editPassword;
     if (!Object.keys(updates).length) { setInfo('Nothing to update.'); return; }
+    setLoadingProfile(true);
     try {
       const response = await apiFetch('/account', {
         method: 'PUT',
@@ -1051,6 +1058,7 @@ function App() {
       setEditPassword('');
       setInfo('Account updated.');
     } catch (err) { setError(`Network error: ${err.message}`); }
+    finally { setLoadingProfile(false); }
   };
 
   const handleProfilePicUpload = (e) => {
@@ -1084,6 +1092,7 @@ function App() {
   const handleForgotPassword = async (e) => {
     e.preventDefault();
     clearFeedback();
+    setLoadingReset(true);
     try {
       const response = await fetch(`${API_BASE}/auth/forgot-password`, {
         method: 'POST',
@@ -1095,11 +1104,13 @@ function App() {
       setResetStep(2);
       setInfo('If that email is registered, a 6-digit code has been sent.');
     } catch (err) { setError(`Network error: ${err.message}`); }
+    finally { setLoadingReset(false); }
   };
 
   const handleResetPassword = async (e) => {
     e.preventDefault();
     clearFeedback();
+    setLoadingReset(true);
     try {
       const response = await fetch(`${API_BASE}/auth/reset-password`, {
         method: 'POST',
@@ -1111,6 +1122,7 @@ function App() {
       setResetStep(0);
       setInfo('Password reset. Sign in with your new password.');
     } catch (err) { setError(`Network error: ${err.message}`); }
+    finally { setLoadingReset(false); }
   };
 
   const getRatingChipStyle = (key, value) => {
@@ -1522,6 +1534,7 @@ function App() {
       return;
     }
 
+    setLoadingPlatforms(true);
     try {
       const response = await apiFetch('/platforms', {
         method: 'PUT',
@@ -1546,6 +1559,8 @@ function App() {
       if (err.message !== 'Unauthorized') {
         setError(`Network error: ${err.message}. Make sure the backend is running at ${API_BASE}.`);
       }
+    } finally {
+      setLoadingPlatforms(false);
     }
   };
 
@@ -1626,7 +1641,9 @@ function App() {
                   style={styles.input} className="mk-input" type="email" placeholder="Email address"
                   value={resetEmail} onChange={(e) => setResetEmail(e.target.value)} autoComplete="email"
                 />
-                <button style={styles.button} className="btn-tap" type="submit">Send Reset Code</button>
+                <button style={{ ...styles.button, ...(loadingReset ? styles.buttonLoading : {}) }} className="btn-tap" type="submit" disabled={loadingReset}>
+                  {loadingReset ? 'Working…' : 'Send Reset Code'}
+                </button>
               </form>
               <div style={styles.authSwitch}>
                 <button style={styles.inlineButton} type="button" onClick={() => { setResetStep(0); clearFeedback(); }}>← Back to Sign In</button>
@@ -1658,7 +1675,9 @@ function App() {
                   style={styles.input} className="mk-input" type="password" placeholder="New password"
                   value={resetNewPass} onChange={(e) => setResetNewPass(e.target.value)} autoComplete="new-password"
                 />
-                <button style={styles.button} className="btn-tap" type="submit">Reset Password</button>
+                <button style={{ ...styles.button, ...(loadingReset ? styles.buttonLoading : {}) }} className="btn-tap" type="submit" disabled={loadingReset}>
+                  {loadingReset ? 'Working…' : 'Reset Password'}
+                </button>
               </form>
               <div style={styles.authSwitch}>
                 <button style={styles.inlineButton} type="button" onClick={() => { setResetStep(1); clearFeedback(); }}>← Re-send code</button>
@@ -1814,8 +1833,8 @@ function App() {
                   </details>
                 </div>
                 <div style={styles.sectionActions}>
-                  <button style={styles.button} className="btn-tap" onClick={handleSavePlatforms} type="button">
-                    {isFirstSetup ? 'Save and Continue →' : 'Save Changes'}
+                  <button style={{ ...styles.button, ...(loadingPlatforms ? styles.buttonLoading : {}) }} className="btn-tap" onClick={handleSavePlatforms} type="button" disabled={loadingPlatforms}>
+                    {loadingPlatforms ? 'Saving…' : (isFirstSetup ? 'Save and Continue →' : 'Save Changes')}
                   </button>
                 </div>
                 {!isFirstSetup && catalogStatus && (
@@ -1868,7 +1887,9 @@ function App() {
                     value={editPassword} onChange={(e) => setEditPassword(e.target.value)} autoComplete="new-password" />
                 </div>
                 <div style={styles.sectionActions}>
-                  <button style={styles.button} className="btn-tap" type="submit">Save Profile</button>
+                  <button style={{ ...styles.button, ...(loadingProfile ? styles.buttonLoading : {}) }} className="btn-tap" type="submit" disabled={loadingProfile}>
+                    {loadingProfile ? 'Saving…' : 'Save Profile'}
+                  </button>
                 </div>
 
                 {/* Letterboxd Import */}

@@ -502,9 +502,9 @@ function createApp(db, { disableRateLimit = false } = {}) {
 
             const mediaType = req.query.mediaType || 'all';
             const sortBy = req.query.sortBy || 'popularity';
-            const limit = req.query.limit || 24;
+            const limit = Math.min(Math.max(1, parseInt(req.query.limit, 10) || 24), 100);
             const region = req.query.region || 'US';
-            const page = req.query.page || 1;
+            const page = Math.max(1, parseInt(req.query.page, 10) || 1);
             const languageFilters = String(req.query.languageFilters || '')
               .split(',').map((v) => v.trim()).filter(Boolean);
             const genreFilters = String(req.query.genreFilters || '')
