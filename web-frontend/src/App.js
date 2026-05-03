@@ -763,7 +763,9 @@ function App() {
   const [lbxPreview, setLbxPreview] = useState(null);
   const [lbxProgress, setLbxProgress] = useState('');
   const [lbxDone, setLbxDone] = useState('');
-  const [resetStep, setResetStep] = useState(0); // 0: off, 1: email, 2: code, 3: done
+  const [lbxIntendedType, setLbxIntendedType] = useState('watched');
+  const [lbxMismatch, setLbxMismatch] = useState('');
+  const [streamingWatchlist, setStreamingWatchlist] = useState(false);  const [resetStep, setResetStep] = useState(0); // 0: off, 1: email, 2: code, 3: done
   const [resetEmail, setResetEmail] = useState('');
   const [registerEmail, setRegisterEmail] = useState('');
   const [resetCode, setResetCode] = useState('');
@@ -917,12 +919,15 @@ function App() {
     } catch { /* silent */ }
   };
 
-  const handleLbxFileChange = async (e) => {
+  const handleLbxFileChange = async (e, intendedType) => {
     const file = e.target.files?.[0];
+    const input = e.target;
     if (!file) return;
     setLbxFile(file);
     setLbxDone('');
     setLbxPreview(null);
+    setLbxMismatch('');
+    setLbxIntendedType(intendedType);
     setLbxProgress('Parsing CSV…');
     try {
       const text = await file.text();
@@ -933,22 +938,27 @@ function App() {
       });
       if (!response.ok) throw new Error('Preview failed');
       const data = await parseResponseBody(response);
+      if (data.importType && data.importType !== intendedType) {
+        setLbxMismatch(`This looks like a ${data.importType === 'watchlist' ? 'watchlist' : 'watched history'} CSV — you selected "${intendedType === 'watchlist' ? 'Import Watchlist' : 'Import Watched'}". Continue importing as ${intendedType}?`);
+      }
       setLbxPreview(data);
       setLbxProgress('');
     } catch (err) {
       setLbxProgress('');
       setLbxDone('⚠ ' + (err.message || 'Failed to parse CSV'));
+    } finally {
+      input.value = '';
     }
   };
 
   const handleLbxImport = async () => {
     if (!lbxPreview || !lbxFile) return;
-    const { items, importType } = lbxPreview;
+    const { items } = lbxPreview;
+    const importType = lbxIntendedType;  // use the button the user pressed, not server detection
     const batchSize = 50;
     let offset = 0;
     let totalMatched = 0;
     let totalNotFound = 0;
-    const text = await lbxFile.text();
     // Re-parse items just in case (preview items already available)
     const allItems = items || [];
     setLbxPreview(null);
@@ -1176,10 +1186,15 @@ function App() {
         page: String(catalogPage),
       });
 
-      if (serviceFilters.length) {
-        query.set('serviceFilters', serviceFilters.join(','));
+      if (streamingWatchlist && watchlistIds.size > 0) {
+        query.set('watchlistOnly', 'true');
+        if (selected.length) query.set('serviceFilters', selected.join(','));
+      } else {
+        if (watchlistOnly && watchlistIds.size > 0) query.set('watchlistOnly', 'true');
+        if (serviceFilters.length) {
+          query.set('serviceFilters', serviceFilters.join(','));
+        }
       }
-
       if (languageFilters.length) {
         query.set('languageFilters', languageFilters.join(','));
       }
@@ -1191,7 +1206,6 @@ function App() {
       if (yearMin !== YEAR_RANGE_MIN) query.set('yearMin', yearMin);
       if (yearMax !== YEAR_RANGE_MAX) query.set('yearMax', yearMax);
       if (hideWatched) query.set('hideWatched', 'true');
-      if (watchlistOnly && watchlistIds.size > 0) query.set('watchlistOnly', 'true');
 
       const response = await apiFetch(`/movies?${query.toString()}`, {
         signal: controller.signal,
@@ -1222,7 +1236,7 @@ function App() {
     } finally {
       setLoadingMovies(false);
     }
-  }, [isBypassMode, mediaTypeFilter, sortBy, catalogPage, serviceFilters, languageFilters, genreFilters, yearMin, yearMax, hideWatched, watchlistOnly, watchlistIds, token, platformSaveKey]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [isBypassMode, mediaTypeFilter, sortBy, catalogPage, serviceFilters, languageFilters, genreFilters, yearMin, yearMax, hideWatched, watchlistOnly, watchlistIds, streamingWatchlist, selected, token, platformSaveKey]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const formatMediaType = (value) => {
     if (value === 'documentary') {
@@ -1898,26 +1912,37 @@ function App() {
                 <div style={{ marginTop: 28, padding: '20px', background: 'rgba(108,99,255,0.08)', borderRadius: 12, border: '1px solid rgba(108,99,255,0.25)' }}>
                   <div style={{ fontWeight: 700, color: '#8b82ff', fontSize: 14, marginBottom: 6 }}>📦 Import from Letterboxd</div>
                   <div style={{ color: '#6e7a93', fontSize: 12, marginBottom: 14, lineHeight: 1.5 }}>
-                    Export your diary or watchlist from Letterboxd (letterboxd.com/settings/data), then upload the CSV here.
+                    Export your watched.csv or watchlist.csv from Letterboxd (letterboxd.com/settings/data), then use the matching button below.
                   </div>
                   {!lbxPreview && !lbxProgress && (
-                    <label style={{ ...styles.button, ...styles.buttonSecondary, display: 'inline-block', cursor: 'pointer', fontSize: 13 }}>
-                      Choose CSV file
-                      <input type="file" accept=".csv,text/csv" style={{ display: 'none' }} onChange={handleLbxFileChange} />
-                    </label>
+                    <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+                      <label style={{ ...styles.button, ...styles.buttonSecondary, display: 'inline-block', cursor: 'pointer', fontSize: 13 }}>
+                        📺 Import Watched
+                        <input type="file" accept=".csv,text/csv" style={{ display: 'none' }} onChange={(e) => handleLbxFileChange(e, 'watched')} />
+                      </label>
+                      <label style={{ ...styles.button, ...styles.buttonSecondary, display: 'inline-block', cursor: 'pointer', fontSize: 13 }}>
+                        🔖 Import Watchlist
+                        <input type="file" accept=".csv,text/csv" style={{ display: 'none' }} onChange={(e) => handleLbxFileChange(e, 'watchlist')} />
+                      </label>
+                    </div>
                   )}
                   {lbxProgress && <div style={{ color: '#c0c8d8', fontSize: 13, marginTop: 8 }}>{lbxProgress}</div>}
                   {lbxDone && <div style={{ color: lbxDone.startsWith('✓') ? '#01d277' : '#e94560', fontSize: 13, marginTop: 8 }}>{lbxDone}</div>}
                   {lbxPreview && !lbxProgress && (
                     <div style={{ marginTop: 8 }}>
-                      <div style={{ color: '#c0c8d8', fontSize: 13, marginBottom: 12 }}>
-                        Found <strong style={{ color: '#eef0f7' }}>{lbxPreview.count}</strong> {lbxPreview.importType === 'watchlist' ? 'watchlist items' : 'watched movies'} to import.
+                      <div style={{ color: '#c0c8d8', fontSize: 13, marginBottom: lbxMismatch ? 8 : 12 }}>
+                        Found <strong style={{ color: '#eef0f7' }}>{lbxPreview.count}</strong> {lbxIntendedType === 'watchlist' ? 'watchlist items' : 'watched movies'} to import.
                       </div>
+                      {lbxMismatch && (
+                        <div style={{ color: '#f59e0b', fontSize: 12, marginBottom: 10, lineHeight: 1.4 }}>
+                          ⚠ {lbxMismatch}
+                        </div>
+                      )}
                       <div style={{ display: 'flex', gap: 10 }}>
                         <button type="button" style={{ ...styles.button, fontSize: 13 }} onClick={handleLbxImport}>
                           Import all
                         </button>
-                        <button type="button" style={{ ...styles.button, ...styles.buttonSecondary, fontSize: 13 }} onClick={() => { setLbxPreview(null); setLbxFile(null); }}>
+                        <button type="button" style={{ ...styles.button, ...styles.buttonSecondary, fontSize: 13 }} onClick={() => { setLbxPreview(null); setLbxFile(null); setLbxMismatch(''); }}>
                           Cancel
                         </button>
                       </div>
@@ -2083,10 +2108,22 @@ function App() {
               <div style={{ width: '100%', marginBottom: 12, display: 'flex', alignItems: 'center', gap: 10 }}>
                 <button type="button"
                   style={{ ...styles.serviceFilterButton, ...(watchlistOnly ? { background: 'rgba(108,99,255,0.15)', border: '1px solid rgba(108,99,255,0.5)', color: '#8b82ff' } : {}) }}
-                  onClick={() => { setWatchlistOnly((v) => !v); setCatalogPage(1); }}>
+                  onClick={() => { const next = !watchlistOnly; setWatchlistOnly(next); if (next) setStreamingWatchlist(false); setCatalogPage(1); }}>
                   {watchlistOnly ? '🔖 From watchlist' : '○ From watchlist'}
                 </button>
                 <span style={{ color: '#6e7a93', fontSize: 12 }}>{watchlistIds.size} saved</span>
+              </div>
+            )}
+
+            {/* Streaming Watchlist toggle — watchlist items available on configured services */}
+            {watchlistIds.size > 0 && selected.length > 0 && (
+              <div style={{ width: '100%', marginBottom: 12, display: 'flex', alignItems: 'center', gap: 10 }}>
+                <button type="button"
+                  style={{ ...styles.serviceFilterButton, ...(streamingWatchlist ? { background: 'rgba(1,210,119,0.12)', border: '1px solid rgba(1,210,119,0.4)', color: '#01d277' } : {}) }}
+                  onClick={() => { const next = !streamingWatchlist; setStreamingWatchlist(next); if (next) setWatchlistOnly(false); setCatalogPage(1); }}>
+                  {streamingWatchlist ? '📡 Streaming watchlist' : '○ Streaming watchlist'}
+                </button>
+                <span style={{ color: '#6e7a93', fontSize: 12 }}>on my services</span>
               </div>
             )}
 

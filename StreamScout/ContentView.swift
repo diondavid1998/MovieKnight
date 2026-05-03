@@ -786,8 +786,8 @@ struct CatalogView: View {
                         watchlistOnly.toggle(); page = 1; Task { await fetch() }
                     } label: {
                         FilterChip(
-                            label: "From Watchlist",
-                            icon: "bookmark.fill", active: watchlistOnly
+                            label: "Streaming Watchlist",
+                            icon: "play.rectangle.on.rectangle.fill", active: watchlistOnly
                         )
                     }
                 }
@@ -2222,9 +2222,11 @@ struct ProfileTabView: View {
     @State private var isLoadingAccount = true
     // Letterboxd import
     @State private var showFileImporter = false
+    @State private var lbxIntendedType = "watched"
     @State private var lbxImportType = ""
     @State private var lbxItems: [[String: Any]] = []
     @State private var showLbxConfirm = false
+    @State private var showLbxMismatch = false
     @State private var lbxImportProgress: String? = nil
     @State private var lbxImportDone: String? = nil
 
@@ -2264,7 +2266,7 @@ struct ProfileTabView: View {
                             .font(.system(size: 15, weight: .semibold))
                             .foregroundColor(.mkText)
                     }
-                    Text("Export your Letterboxd data (watched.csv or watchlist.csv) and import it here.")
+                    Text("Export your watched.csv or watchlist.csv from Letterboxd (letterboxd.com/settings/data) and use the matching button above.")
                         .font(.caption)
                         .foregroundColor(.mkMuted)
                         .fixedSize(horizontal: false, vertical: true)
@@ -2278,8 +2280,15 @@ struct ProfileTabView: View {
                         Text(done).font(.caption).foregroundColor(.green)
                     }
 
-                    MKButton(label: "Select CSV File", icon: "folder.badge.plus", isLoading: lbxImportProgress != nil) {
-                        showFileImporter = true
+                    HStack(spacing: 10) {
+                        MKButton(label: "Import Watched", icon: "eye.fill", isLoading: lbxImportProgress != nil) {
+                            lbxIntendedType = "watched"
+                            showFileImporter = true
+                        }
+                        MKButton(label: "Import Watchlist", icon: "bookmark.fill", isLoading: lbxImportProgress != nil) {
+                            lbxIntendedType = "watchlist"
+                            showFileImporter = true
+                        }
                     }
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -2313,6 +2322,12 @@ struct ProfileTabView: View {
                 ? "These will be added to your watched history."
                 : "These will be saved to your watchlist.")
         }
+        .alert("CSV Type Mismatch", isPresented: $showLbxMismatch) {
+            Button("Import as \(lbxImportType == "watched" ? "Watched" : "Watchlist")") { showLbxConfirm = true }
+            Button("Cancel", role: .cancel) { lbxItems = [] }
+        } message: {
+            Text("This file looks like a \(lbxImportType == "watched" ? "watchlist" : "watched history") CSV. Are you sure you want to import it as \(lbxImportType == "watched" ? "watched movies" : "your watchlist")?")
+        }
     }
 
     @MainActor func handleLetterboxdFile(url: URL) async {
@@ -2332,11 +2347,14 @@ struct ProfileTabView: View {
                 body: ["csvText": text, "fileName": url.lastPathComponent],
                 token: app.token
             )
-            lbxImportType = resp.importType ?? "watched"
+            let detectedType = resp.importType ?? "watched"
+            lbxImportType = lbxIntendedType  // always use the button the user pressed
             lbxItems = resp.items.map { item in ["name": item.name, "year": item.year] }
             lbxImportProgress = nil
             if lbxItems.isEmpty {
                 lbxImportDone = "No valid rows found in CSV"
+            } else if detectedType != lbxIntendedType {
+                showLbxMismatch = true  // warn before confirming
             } else {
                 showLbxConfirm = true
             }
