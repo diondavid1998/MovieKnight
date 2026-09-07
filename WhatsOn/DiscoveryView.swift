@@ -57,25 +57,29 @@ struct DiscoveryView: View {
 
     // MARK: Header
 
+    /// One line, not a title block.
+    ///
+    /// The screen's name is already drawn by the tab bar above this view, so a
+    /// second "For you" heading was both a repetition and a theft of the only
+    /// thing this screen needs height for — the card.
     private var header: some View {
-        HStack(alignment: .firstTextBaseline) {
-            VStack(alignment: .leading, spacing: 2) {
-                Text("For you").font(.title2.weight(.bold)).foregroundColor(.mkText)
-                if let profile {
-                    // Says what the suggestions rest on. A queue built from the
-                    // crowd must not read as though it were built from you.
-                    Text(basisLine(profile))
-                        .font(.caption).foregroundColor(.mkMuted)
-                }
+        HStack(spacing: 10) {
+            if let profile {
+                // Says what the suggestions rest on. A queue built from the
+                // crowd must not read as though it were built from you.
+                Text(basisLine(profile))
+                    .font(.caption).foregroundColor(.mkMuted)
+                    .lineLimit(2)
+                    .fixedSize(horizontal: false, vertical: true)
             }
-            Spacer()
+            Spacer(minLength: 8)
             Button { showFilters = true } label: {
                 Image(systemName: "line.3.horizontal.decrease.circle")
                     .font(.title3).foregroundColor(.mkAccent)
             }
             .accessibilityLabel("Filters")
         }
-        .padding(.horizontal, 20).padding(.top, 8).padding(.bottom, 14)
+        .padding(.horizontal, 20).padding(.top, 10).padding(.bottom, 12)
     }
 
     private func basisLine(_ p: DiscoveryProfile) -> String {
@@ -113,8 +117,13 @@ struct DiscoveryView: View {
                         }
                 )
         }
+        // A card, not a panel. Without a ratio it took whatever height was
+        // left over — squat where the chrome was tall, absurdly long where it
+        // was not — and the poster stretched with it. `fit` keeps the shape and
+        // centres it in whatever room there is.
+        .aspectRatio(0.74, contentMode: .fit)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
         .padding(.horizontal, 18)
-        .frame(maxHeight: .infinity)
     }
 
     // MARK: Actions
@@ -394,6 +403,11 @@ private struct DiscoveryCardView: View {
                         .font(.caption2).foregroundColor(.mkAccent).padding(.top, 2)
                     Text(reasonText(reason))
                         .font(.caption).foregroundColor(.white.opacity(0.9))
+                        // Two lines apiece. A director with a long name and a
+                        // long detail could otherwise run to three or four, and
+                        // two of those stacked pushed the block past the card's
+                        // rounded edge, where it was clipped mid-word.
+                        .lineLimit(2)
                         .fixedSize(horizontal: false, vertical: true)
                 }
             }
@@ -405,6 +419,10 @@ private struct DiscoveryCardView: View {
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(18)
+        // Belt and braces against a very long title on a small phone: the block
+        // is allowed a little over half the card and no more, so the artwork is
+        // never entirely buried by its own caption.
+        .frame(maxHeight: 260, alignment: .bottom)
     }
 
     private func reasonText(_ reason: DiscoveryReason) -> String {

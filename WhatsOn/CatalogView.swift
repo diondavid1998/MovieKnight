@@ -305,14 +305,25 @@ struct CatalogView: View {
                             if isSelected {
                                 Text(tab.label)
                                     .font(.footnote.weight(.semibold))
-                                    .fixedSize()
+                                    .lineLimit(1)
+                                    // Shrinks rather than pushes. `fixedSize`
+                                    // let the longest label ("Watchlist") set
+                                    // the bar's width no matter how little room
+                                    // was left for it.
+                                    .minimumScaleFactor(0.8)
                                     .transition(.opacity.combined(with: .blurReplace))
                             }
                         }
                         .foregroundStyle(isSelected ? Color.mkText : Color.mkMuted)
                         .frame(height: Layout.tabItemHeight)
-                        .frame(minWidth: 56)
-                        .padding(.horizontal, isSelected ? 16 : 8)
+                        .padding(.horizontal, isSelected ? 14 : 10)
+                        // The minimum applies *after* the padding, not before
+                        // it. Before, it was 56pt of frame plus 8pt of padding
+                        // on each side — 72pt for an icon-only tab, which put
+                        // four tabs at 396pt on a 393pt phone and five at 471pt.
+                        // 44pt is the touch target Apple asks for and all this
+                        // needs to be.
+                        .frame(minWidth: 44)
                         .contentShape(Capsule())
                     }
                     .buttonStyle(.plain)
