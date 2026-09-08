@@ -1,11 +1,63 @@
-<svg width="1024" height="1024" viewBox="0 0 1024 1024" fill="none" xmlns="http://www.w3.org/2000/svg">
-  <rect width="1024" height="1024" fill="url(#paint0_linear_1_1)"/>
-  <path d="M154 512Q512 252 870 512Q512 772 154 512Z" stroke="#F7913D" stroke-width="60" stroke-linejoin="miter"/>
-  <path d="M454 424L628 512L454 600Z" fill="#F7913D" stroke="#F7913D" stroke-width="18" stroke-linejoin="round"/>
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+  <!--
+    StreamScout — "Spark Play".
+
+    A play triangle (this is something to watch) beside a four-point spark
+    (this one was picked for you). The two together are the whole product:
+    the app does not hold a library, it points at the one title worth
+    starting tonight.
+
+    Klieg palette. #FFC24D is the colour of a tungsten film lamp — the
+    3200K point on the Planckian locus, warmed a little — so the mark reads
+    as projected light rather than as a generic dark-UI accent.
+
+    Deliberately full-square and opaque: iOS applies its own squircle mask,
+    and an icon that ships with rounded corners baked in gets them cut
+    twice. Keep the ink inside a 200px margin so the mask never clips it.
+
+    Source of truth for every rasterised icon, flat and layered alike. The two
+    groups below are addressed by name: `npm run icons` hides one or the other
+    to cut the Icon Composer background and foreground layers out of this same
+    file, so there is never a second copy of the artwork to fall out of date.
+
+    Regenerate with:
+        npm run icons
+  -->
   <defs>
-    <linearGradient id="paint0_linear_1_1" x1="512" y1="0" x2="512" y2="1024" gradientUnits="userSpaceOnUse">
-      <stop stop-color="#16181D"/>
-      <stop offset="1" stop-color="#0B0C0F"/>
+    <linearGradient id="plate" x1="0" y1="0" x2="0.28" y2="1">
+      <stop offset="0" stop-color="#241809"/>
+      <stop offset="0.55" stop-color="#1A1206"/>
+      <stop offset="1" stop-color="#120C04"/>
+    </linearGradient>
+    <!-- Dark appearance. The same lamp, one stop down: iOS 26 asks for a
+         deeper plate when the system is dark, not a different colour. -->
+    <linearGradient id="plateDark" x1="0" y1="0" x2="0.28" y2="1">
+      <stop offset="0" stop-color="#150E05"/>
+      <stop offset="0.55" stop-color="#0E0904"/>
+      <stop offset="1" stop-color="#080502"/>
+    </linearGradient>
+    <!-- The light falls from above, as it would on a curved surface. -->
+    <linearGradient id="sheen" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#FFF3D6" stop-opacity="0.10"/>
+      <stop offset="0.52" stop-color="#FFF3D6" stop-opacity="0"/>
     </linearGradient>
   </defs>
+
+  <g id="plate-layer">
+    <rect id="plate-base" width="1024" height="1024" fill="url(#plate)"/>
+    <rect width="1024" height="540" fill="url(#sheen)"/>
+  </g>
+
+  <g id="mark-layer">
+    <!-- Play. Stroked as well as filled so the corners round: a sharp-cornered
+         triangle looks brittle beside the spark's soft points. -->
+    <path d="M272 350 L640 562 L272 774 Z"
+          fill="#FFC24D" stroke="#FFC24D" stroke-width="96"
+          stroke-linejoin="round" stroke-linecap="round"/>
+
+    <!-- Spark. Concave sides, so it reads as a glint and not as a star —
+         a star would say "rating", which is a different claim. -->
+    <path d="M712 194 Q737 287 830 312 Q737 337 712 430 Q687 337 594 312 Q687 287 712 194 Z"
+          fill="#FFF3D6"/>
+  </g>
 </svg>
