@@ -178,20 +178,33 @@ final class WhatsOnTests: XCTestCase {
     /// view every time.
     func testTheSnapshotSignatureIgnoresTheOrderFiltersWereAddedIn() {
         let a = AnalyticsSnapshot.signature(
-            dimension: "cast", filters: ["language": "en", "genre": "Drama"]
+            ["dimension": "cast", "language": "en", "genre": "Drama"]
         )
         let b = AnalyticsSnapshot.signature(
-            dimension: "cast", filters: ["genre": "Drama", "language": "en"]
+            ["genre": "Drama", "dimension": "cast", "language": "en"]
         )
         XCTAssertEqual(a, b, "the same view signed differently depending on tap order")
     }
 
     func testDifferentViewsNeverShareASignature() {
-        let overview = AnalyticsSnapshot.signature(dimension: "overview", filters: [:])
-        let cast = AnalyticsSnapshot.signature(dimension: "cast", filters: [:])
-        let castFiltered = AnalyticsSnapshot.signature(dimension: "cast", filters: ["language": "en"])
-        let castOther = AnalyticsSnapshot.signature(dimension: "cast", filters: ["language": "ja"])
+        let overview = AnalyticsSnapshot.signature(["dimension": "overview"])
+        let cast = AnalyticsSnapshot.signature(["dimension": "cast"])
+        let castFiltered = AnalyticsSnapshot.signature(["dimension": "cast", "language": "en"])
+        let castOther = AnalyticsSnapshot.signature(["dimension": "cast", "language": "ja"])
         XCTAssertEqual(Set([overview, cast, castFiltered, castOther]).count, 4)
+    }
+
+    /// The ordering changes what comes back, so it has to change the signature.
+    /// Without this, switching from "most watched" to "highest rated" would seed
+    /// the new view from the old view's stored bytes and show the reader a list
+    /// they did not ask for until the response landed.
+    func testTheOrderingIsPartOfTheSignature() {
+        let byCount = AnalyticsSnapshot.signature(["dimension": "directors", "sort": "films"])
+        let byRating = AnalyticsSnapshot.signature(["dimension": "directors", "sort": "rating"])
+        let byRatingFloored = AnalyticsSnapshot.signature(
+            ["dimension": "directors", "sort": "rating", "minFilms": "5"]
+        )
+        XCTAssertEqual(Set([byCount, byRating, byRatingFloored]).count, 3)
     }
 
     func testStoredBytesComeBackOnlyForTheViewTheyWereCapturedUnder() {
@@ -322,6 +335,88 @@ final class WhatsOnTests: XCTestCase {
         // The facets added later are optional, so an older server still decodes.
         XCTAssertTrue(response.filters.available.options(for: "keyword").isEmpty)
         XCTAssertTrue(response.filters.available.options(for: "country").isEmpty)
+    }
+
+    /// The ordering arrived after the app shipped, so a server that predates it
+    /// must still produce a page — one with fewer controls, not an error screen.
+    func testABreakdownFromABeforeOrderingExistedStillDecodes() throws {
+        let breakdown = try decode(AnalyticsBreakdown.self, #"""
+        {"id":"directors","title":"Directors","unit":"director","filterKey":"director",
+         "total":2,"needsLookup":true,"best":[],"worst":[],
+         "entries":[{"name":"Akira Kurosawa","label":"Akira Kurosawa","films":7,
+                     "rated":7,"meanRating":4.4,"crowdMean":null,"delta":0.6}]}
+        """#)
+        XCTAssertNil(breakdown.sort)
+        XCTAssertNil(breakdown.minFilms)
+        XCTAssertNil(breakdown.hidden)
+        // The entry's new counters default rather than failing the whole decode.
+        let entry = try XCTUnwrap(breakdown.entries.first)
+        XCTAssertEqual(entry.liked, 0)
+        XCTAssertEqual(entry.rewatches, 0)
+        XCTAssertNil(entry.crowdDelta)
+    }
+
+    func testTheOrderingsAreReadWhenTheServerSendsThem() throws {
+        let breakdown = try decode(AnalyticsBreakdown.self, #"""
+        {"id":"cast","title":"Cast","unit":"actor","filterKey":"actor",
+         "total":40,"needsLookup":true,"best":[],"worst":[],
+         "sort":"rating","minFilms":3,"hidden":31,
+         "entries":[{"name":"Toshiro Mifune","label":"Toshiro Mifune","films":9,
+                     "rated":9,"meanRating":4.5,"crowdMean":7.8,"delta":0.7,
+                     "crowdDelta":-0.3,"liked":4,"rewatches":2}]}
+        """#)
+        XCTAssertEqual(breakdown.sort, "rating")
+        XCTAssertEqual(breakdown.minFilms, 3)
+        // The count of what the floor removed is what lets the page explain a
+        // missing name instead of leaving the reader to suspect the import.
+        XCTAssertEqual(breakdown.hidden, 31)
+
+        let entry = try XCTUnwrap(breakdown.entries.first)
+        XCTAssertEqual(entry.liked, 4)
+        XCTAssertEqual(entry.rewatches, 2)
+        XCTAssertEqual(entry.crowdDelta, -0.3)
+    }
+
+    /// An ordering that drops unrated entries has to say so, because the control
+    /// that goes with it — the evidence floor — is only shown for those.
+    func testAnOrderingKnowsWhetherItNeedsARating() throws {
+        let sorts = try decode([AnalyticsSort].self, #"""
+        [{"id":"films","title":"Most watched","needsRating":false},
+         {"id":"rating","title":"Highest rated","needsRating":true},
+         {"id":"legacy","title":"From an older server"}]
+        """#)
+        XCTAssertEqual(sorts.map(\.needsRating), [false, true, false])
+    }
+
+    /// The film list is absent on an unfiltered page and present on a filtered
+    /// one, and the page has to render both.
+    func testTheFilmListIsOptional() throws {
+        let response = try decode(AnalyticsResponse.self, #"""
+        {"dimension":"overview","dimensions":[],
+         "filters":{"applied":[],"available":{"languages":[],"genres":[],"decades":[],
+                    "directors":[],"cast":[],"tags":[]}},
+         "scope":{"films":0,"filmsTotal":0,"filtered":false},
+         "coverage":{"films":0,"resolved":0,"pending":0,"unmatched":0,"needsResolution":[]},
+         "summary":{"films":0,"viewings":0,"rated":0,"meanRating":null,"runtimeMinutes":0,
+                    "tasteOffset":null,"comparedOn":0}}
+        """#)
+        XCTAssertNil(response.films)
+    }
+
+    func testAnUnmatchedFilmDecodesAsUnresolved() throws {
+        // The distinction the list exists for: a film that counts toward the
+        // totals and toward no genre, director or cast.
+        let films = try decode([AnalyticsFilm].self, #"""
+        [{"name":"Found Film","year":2020,"rating":5,"watchedOn":"2026-01-01",
+          "posterUrl":null,"resolved":true,"viewings":2},
+         {"name":"Missing Film","year":2019,"rating":null,"watchedOn":null,
+          "posterUrl":null,"resolved":false,"viewings":1}]
+        """#)
+        XCTAssertEqual(films.count, 2)
+        XCTAssertTrue(films[0].resolved)
+        XCTAssertEqual(films[0].viewings, 2)
+        XCTAssertFalse(films[1].resolved)
+        XCTAssertNil(films[1].rating)
     }
 
     func testTheNewFacetsAreReadWhenTheServerSendsThem() throws {

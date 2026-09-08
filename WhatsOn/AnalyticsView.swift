@@ -306,6 +306,21 @@ struct AnalyticsView: View {
     @State private var dimension = "overview"
     @State private var filters: [String: String] = [:]
 
+    /// How the lists are ordered, and how much evidence an entry needs before it
+    /// is ranked at all. Both go to the server, which owns the arithmetic.
+    ///
+    /// The floor exists because "highest rated" over a whole history is mostly a
+    /// list of people the reader has seen once. The server already damps a small
+    /// sample toward the reader's own average so the default ordering is sound
+    /// without any configuration; this is for the reader who wants to say
+    /// "only names I have watched five times".
+    @State private var sort = "films"
+    @State private var minFilms = 1
+
+    /// Which shape the taste map is drawn in. Groups by default, because it is
+    /// the only one where every genre is named and nothing can overlap.
+    @State private var mapStyle: MapStyle = .groups
+
     /// The genre named on the taste map beyond its four corners, if the reader
     /// has tapped one. Cleared whenever the page reloads under a new lens.
     @State private var selectedGenre: String?
@@ -489,6 +504,8 @@ struct AnalyticsView: View {
                 .scrollBounceBehavior(.basedOnSize, axes: .horizontal)
             }
 
+            sortBar(a)
+
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 6) {
                     ForEach(a.dimensions) { lens in
@@ -516,6 +533,150 @@ struct AnalyticsView: View {
         .padding(.horizontal, 16)
         .padding(.top, 8)
         .padding(.bottom, 10)
+    }
+
+    /// How the lists are ordered, and the evidence floor under them.
+    ///
+    /// Every list on this screen used to be ranked by film count and nothing
+    /// else, which answers "what do I watch" and quietly refuses every other
+    /// question — including the one a diary of ratings is mostly *for*. This is
+    /// that refusal removed.
+    @ViewBuilder
+    private func sortBar(_ a: AnalyticsResponse) -> some View {
+        let options = a.sorts ?? [AnalyticsSort(id: "films", title: "Most watched", needsRating: false)]
+        let current = options.first { $0.id == sort } ?? options[0]
+
+        HStack(spacing: 8) {
+            Menu {
+                Picker("Order", selection: sortBinding) {
+                    ForEach(options) { option in Text(option.title).tag(option.id) }
+                }
+            } label: {
+                HStack(spacing: 5) {
+                    Image(systemName: "arrow.up.arrow.down")
+                        .font(.caption.weight(.bold))
+                    Text(current.title)
+                        .font(.subheadline.weight(.semibold))
+                        .lineLimit(1)
+                }
+                .foregroundColor(sort == "films" ? .mkText : .mkOnAccent)
+                .padding(.horizontal, 12).padding(.vertical, 7)
+                .background(sort == "films" ? Color.mkSubtleFill : Color.mkAccent, in: Capsule())
+            }
+            .accessibilityLabel("Order by \(current.title)")
+
+            // The floor only means anything once an ordering cares about it, so
+            // it stays out of the way until then rather than sitting there as a
+            // control with no visible effect.
+            if current.needsRating {
+                Menu {
+                    Picker("Minimum films", selection: minFilmsBinding) {
+                        ForEach([1, 2, 3, 5, 10], id: \.self) { n in
+                            Text(n == 1 ? "Any number of films" : "\(n)+ films").tag(n)
+                        }
+                    }
+                } label: {
+                    Text(minFilms == 1 ? "Any" : "\(minFilms)+")
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundColor(minFilms == 1 ? .mkText : .mkOnAccent)
+                        .padding(.horizontal, 12).padding(.vertical, 7)
+                        .background(minFilms == 1 ? Color.mkSubtleFill : Color.mkAccent, in: Capsule())
+                }
+                .accessibilityLabel(minFilms == 1 ? "Any number of films" : "At least \(minFilms) films")
+            }
+
+            Spacer(minLength: 0)
+
+            // Names the ordering removed, said out loud. A reader who orders by
+            // rating and finds a favourite director gone should be told it was
+            // the floor or the missing rating, not left to suspect the import.
+            if let hidden = a.breakdown?.hidden, hidden > 0 {
+                Text("\(hidden) hidden")
+                    .font(.caption).foregroundColor(.mkMuted)
+                    .accessibilityLabel("\(hidden) entries hidden by this ordering")
+            }
+        }
+    }
+
+    private var sortBinding: Binding<String> {
+        Binding(
+            get: { sort },
+            set: { next in
+                guard next != sort else { return }
+                sort = next
+                reload()
+            }
+        )
+    }
+
+    private var minFilmsBinding: Binding<Int> {
+        Binding(
+            get: { minFilms },
+            set: { next in
+                guard next != minFilms else { return }
+                minFilms = next
+                reload()
+            }
+        )
+    }
+
+    /// The films behind whatever the filters have narrowed to.
+    ///
+    /// Every other number on this page is a count of films the reader cannot
+    /// see. That is fine until one of them looks wrong — a director you know you
+    /// have watched more of than it says — and then there is nothing to check
+    /// against. Two causes look identical from the outside and are both common:
+    /// films the lookup has not reached, and films that resolved to the wrong
+    /// title. The first is marked here; the second is visible the moment you
+    /// read the list and find something that does not belong.
+    @ViewBuilder
+    private func filmList(_ films: [AnalyticsFilm]) -> some View {
+        let unresolved = films.filter { !$0.resolved }.count
+        VStack(alignment: .leading, spacing: 8) {
+            sectionHeader("The films behind this", note: "\(films.count)")
+            if unresolved > 0 {
+                caption("\(unresolved) of these could not be matched to the film database, so they count toward your totals but toward no genre, director or cast.")
+            }
+            // Lazy, and indexed rather than enumerated: this can be two hundred
+            // rows, and only the ones on screen are worth building.
+            LazyVStack(spacing: 0) {
+                ForEach(films.indices, id: \.self) { index in
+                    let film = films[index]
+                    HStack(spacing: 10) {
+                        Text(film.name)
+                            .font(.subheadline)
+                            .foregroundColor(film.resolved ? .mkText : .mkMuted)
+                            .lineLimit(1)
+                        if !film.resolved {
+                            Image(systemName: "questionmark.circle")
+                                .font(.caption2)
+                                .foregroundColor(.mkMuted)
+                                .accessibilityLabel("Not matched to the film database")
+                        }
+                        Spacer(minLength: 6)
+                        if film.viewings > 1 {
+                            Text("×\(film.viewings)")
+                                .font(.caption2.monospacedDigit()).foregroundColor(.mkMuted)
+                        }
+                        if let year = film.year {
+                            Text(String(year))
+                                .font(.caption.monospacedDigit()).foregroundColor(.mkMuted)
+                        }
+                        if let rating = film.rating {
+                            Text(String(format: "%.1f★", rating))
+                                .font(.caption.monospacedDigit()).foregroundColor(.mkMuted)
+                                .frame(minWidth: 40, alignment: .trailing)
+                        }
+                    }
+                    .padding(.horizontal, 13).padding(.vertical, 9)
+                    .accessibilityElement(children: .combine)
+                    if index < films.count - 1 {
+                        Divider().overlay(Color.mkBorder).padding(.leading, 13)
+                    }
+                }
+            }
+            .background(Color.mkSurface, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+        }
     }
 
     private func scopeLine(_ a: AnalyticsResponse) -> String {
@@ -555,6 +716,12 @@ struct AnalyticsView: View {
                     tagList(collection)
                 }
             }
+
+            // On every lens, because a drilled-in view is a filtered view
+            // whatever lens it happens to be pointed at, and the working is
+            // worth having on all of them. The server sends it only when
+            // something is filtered.
+            if let films = a.films, !films.isEmpty { filmList(films) }
         }
     }
 
@@ -947,70 +1114,257 @@ struct AnalyticsView: View {
 
     /// The best-rated films, as artwork. Analytics was the only screen in a film
     /// app with no film on it.
-    // MARK: The taste quadrant
+    // MARK: The taste map
 
-    /// Genres on two axes: how often against how highly. The crosshair sits at
-    /// the medians of this history, so the corners describe the reader relative
-    /// to themselves rather than to an absolute scale.
-    /// The four points a reader should actually read, one per corner.
+    /// Which shape the taste map is drawn in.
     ///
-    /// Labelling every point was the whole problem: ten genre names, drawn at a
-    /// fixed offset above ten dots inside a chart a couple of hundred points
-    /// tall, land on top of each other and on the dots, and the result reads as
-    /// noise rather than as a map. The corners are where the meaning is — the
-    /// caption below the chart is written about them — so the extreme of each
-    /// quadrant is named and the rest are reachable by tapping.
-    ///
-    /// Distance is measured on each axis separately as a share of that axis's
-    /// own spread, because films and ratings are not comparable units: a genre
-    /// twenty films out and a genre a star and a half out are both a long way
-    /// from the middle, and raw arithmetic would let the film count win every
-    /// time.
-    private func cornerLabels(_ q: AnalyticsQuadrant) -> Set<String> {
-        let films = q.points.map { Double($0.films) }
-        let ratings = q.points.map(\.meanRating)
-        let filmSpread = max((films.max() ?? 0) - (films.min() ?? 0), 0.0001)
-        let ratingSpread = max((ratings.max() ?? 0) - (ratings.min() ?? 0), 0.0001)
-
-        var picked: Set<String> = []
-        // (moreFilmsThanTypical, ratedAboveTypical) — the four corners.
-        for wantRight in [true, false] {
-            for wantTop in [true, false] {
-                let corner = q.points.filter {
-                    (Double($0.films) >= q.filmsMedian) == wantRight
-                        && ($0.meanRating >= q.ratingMedian) == wantTop
-                }
-                let furthest = corner.max { a, b in
-                    let da = abs(Double(a.films) - q.filmsMedian) / filmSpread
-                        + abs(a.meanRating - q.ratingMedian) / ratingSpread
-                    let db = abs(Double(b.films) - q.filmsMedian) / filmSpread
-                        + abs(b.meanRating - q.ratingMedian) / ratingSpread
-                    return da < db
-                }
-                if let furthest { picked.insert(furthest.name) }
+    /// The map answers one question — what do you watch a lot of, and what do
+    /// you actually rate well — and there is no single form that answers it for
+    /// everyone. Groups name every genre and cannot collide; the plot shows the
+    /// spread but asks the reader to find a dot; bars rank one axis and lose the
+    /// other. So it is a choice rather than a decision made on the reader's
+    /// behalf.
+    enum MapStyle: String, CaseIterable, Identifiable {
+        case groups, plot, bars
+        var id: String { rawValue }
+        var title: String {
+            switch self {
+            case .groups: return "Groups"
+            case .plot:   return "Plot"
+            case .bars:   return "Bars"
             }
         }
-        return picked
+        var icon: String {
+            switch self {
+            case .groups: return "square.grid.2x2"
+            case .plot:   return "chart.dots.scatter"
+            case .bars:   return "chart.bar.xaxis"
+            }
+        }
     }
 
-    private func quadrantChart(_ q: AnalyticsQuadrant) -> some View {
-        let corners = cornerLabels(q)
-        // A tapped genre is named whether or not it is a corner, and the corners
-        // stay named so the chart still reads before anyone touches it.
-        let labelled = selectedGenre.map { corners.union([$0]) } ?? corners
+    /// One of the four things a genre can be, relative to the rest of *this*
+    /// history. The names are the reading — "you love these and rarely reach for
+    /// them" is what the old caption spent three lines explaining under a chart
+    /// that never said which genre it meant.
+    private struct MapGroup: Identifiable {
+        let id: String
+        let title: String
+        let note: String
+        let points: [QuadrantPoint]
+        let emphasised: Bool
+    }
 
-        return VStack(alignment: .leading, spacing: 8) {
-            sectionHeader("Taste map", note: "watched against rated")
+    private func mapGroups(_ q: AnalyticsQuadrant) -> [MapGroup] {
+        func slice(_ often: Bool, _ high: Bool) -> [QuadrantPoint] {
+            q.points
+                .filter { (Double($0.films) >= q.filmsMedian) == often
+                       && ($0.meanRating >= q.ratingMedian) == high }
+                .sorted { $0.meanRating > $1.meanRating }
+        }
+        return [
+            MapGroup(id: "loved", title: "Your favourites",
+                     note: "watched often, rated well",
+                     points: slice(true, true), emphasised: true),
+            MapGroup(id: "quiet", title: "Quiet loves",
+                     note: "rated well, rarely reached for",
+                     points: slice(false, true), emphasised: true),
+            MapGroup(id: "comfort", title: "Comfort watching",
+                     note: "watched often, rated lower",
+                     points: slice(true, false), emphasised: false),
+            MapGroup(id: "passing", title: "Passing interest",
+                     note: "neither often nor highly",
+                     points: slice(false, false), emphasised: false),
+        ].filter { !$0.points.isEmpty }
+    }
+
+    /// The whole map: a style picker, the chosen form, and a line about the
+    /// selected genre.
+    private func quadrantChart(_ q: AnalyticsQuadrant) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            // Not `sectionHeader`: it carries a Spacer of its own, which would
+            // eat the width the picker needs.
+            HStack(spacing: 8) {
+                Text("Taste map").font(.headline).foregroundColor(.mkText)
+                Spacer(minLength: 8)
+                mapStylePicker
+            }
+
+            switch mapStyle {
+            case .groups: mapAsGroups(q)
+            case .plot:   mapAsPlot(q)
+            case .bars:   mapAsBars(q)
+            }
+
+            if let name = selectedGenre, let point = q.points.first(where: { $0.name == name }) {
+                Text("\(point.name) — \(point.films) film\(point.films == 1 ? "" : "s"), averaging \(String(format: "%.2f", point.meanRating))★")
+                    .font(.footnote).foregroundColor(.mkText)
+            } else {
+                caption("Measured against the rest of this history, not an absolute scale: \"often\" means more than your median genre, \"well\" means above your median rating.")
+            }
+        }
+    }
+
+    private var mapStylePicker: some View {
+        HStack(spacing: 2) {
+            ForEach(MapStyle.allCases) { style in
+                Button {
+                    withAnimation(.easeOut(duration: 0.18)) { mapStyle = style }
+                } label: {
+                    Image(systemName: style.icon)
+                        .font(.footnote.weight(.semibold))
+                        .foregroundColor(mapStyle == style ? .mkOnAccent : .mkMuted)
+                        // 44pt wide because that is the finger, not the glyph.
+                        // The height follows the platform's own segmented
+                        // control rather than the 44pt guidance — a 44pt-tall
+                        // control here would be taller than the heading beside
+                        // it — and the width carries the target.
+                        .frame(width: 44, height: 34)
+                        .contentShape(Capsule())
+                        .background(mapStyle == style ? Color.mkAccent : Color.clear, in: Capsule())
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel(style.title)
+                .accessibilityAddTraits(mapStyle == style ? [.isSelected] : [])
+            }
+        }
+        .padding(2)
+        .background(Color.mkSubtleFill, in: Capsule())
+    }
+
+    // MARK: Map — groups
+
+    /// Every genre named, in the corner it belongs to.
+    ///
+    /// This is the default because it is the only one of the three where a genre
+    /// cannot go unread. The plot it replaces named four of ten points, and the
+    /// other six were dots the reader had no way to identify — which is exactly
+    /// what was reported. Here the quadrant is the heading and the genres are
+    /// text inside it, so nothing can overlap anything.
+    private func mapAsGroups(_ q: AnalyticsQuadrant) -> some View {
+        VStack(alignment: .leading, spacing: 12) {
+            ForEach(mapGroups(q)) { group in
+                VStack(alignment: .leading, spacing: 6) {
+                    HStack(spacing: 6) {
+                        Text(group.title)
+                            .font(.subheadline.weight(.semibold))
+                            .foregroundColor(group.emphasised ? .mkText : .mkText.opacity(0.75))
+                        Text(group.note)
+                            .font(.caption).foregroundColor(.mkMuted)
+                            .lineLimit(1).minimumScaleFactor(0.85)
+                    }
+                    FlowLayout(spacing: 6) {
+                        ForEach(group.points) { point in
+                            genreChip(point, emphasised: group.emphasised)
+                        }
+                    }
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(12)
+                .background(Color.mkSurface, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 12, style: .continuous)
+                        .stroke(group.emphasised ? Color.mkAccent.opacity(0.35) : Color.mkBorder, lineWidth: 1)
+                )
+            }
+        }
+    }
+
+    private func genreChip(_ point: QuadrantPoint, emphasised: Bool) -> some View {
+        let selected = point.name == selectedGenre
+        return Button {
+            withAnimation(.easeOut(duration: 0.18)) {
+                selectedGenre = selected ? nil : point.name
+            }
+        } label: {
+            HStack(spacing: 5) {
+                Text(point.name)
+                    .font(.caption.weight(.semibold))
+                // The two numbers ride on the chip rather than waiting for a
+                // tap: they are the whole reason the genre is in this box, and
+                // a chip that only says "Drama" makes the reader work for them.
+                Text("\(point.films)")
+                    .font(.caption2.monospacedDigit())
+                    .foregroundColor(selected ? .mkOnAccent.opacity(0.75) : .mkMuted)
+                Text(String(format: "%.1f★", point.meanRating))
+                    .font(.caption2.monospacedDigit())
+                    .foregroundColor(selected ? .mkOnAccent.opacity(0.75) : .mkMuted)
+            }
+            .foregroundColor(selected ? .mkOnAccent : .mkText)
+            .padding(.horizontal, 9).padding(.vertical, 5)
+            .background(
+                selected ? Color.mkAccent
+                         : (emphasised ? Color.mkAccent.opacity(0.12) : Color.mkSubtleFill),
+                in: Capsule()
+            )
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("\(point.name), \(point.films) films, average \(String(format: "%.1f", point.meanRating)) stars")
+    }
+
+    // MARK: Map — plot
+
+    /// The scatter, kept for the reader who wants the spread, and fixed.
+    ///
+    /// Three things were wrong with it, and only the third was the one reported.
+    ///
+    /// **Film counts are long-tailed.** Genre incidence is not even — a history
+    /// large enough to have ten genres typically has one with several hundred
+    /// films and a tail with a handful each, so on a linear axis most of the
+    /// points crowded into the left third of the plot and the rest of the width
+    /// held one dot. Plotting the *rank* instead spaces them evenly, which is
+    /// why the axis now reads as an order rather than a count — the exact figure
+    /// is on the chip and in the caption, where it can be read.
+    ///
+    /// **The rating axis auto-scaled to the data.** Genre means sit within about
+    /// a quarter of a star of each other once there are enough films behind
+    /// them, and stretching a 0.25-star spread over the full height turned
+    /// rounding into apparent signal: two genres four hundredths apart looked a
+    /// third of the chart apart. The domain is padded to at least a full star so
+    /// small differences look small.
+    ///
+    /// **Six of ten dots had no name.** Labelling every point collided, so the
+    /// old version labelled the four corners and left the rest anonymous. Now
+    /// every point is labelled and the labels alternate above and below, which
+    /// halves the number that can meet; the selected one is always drawn.
+    /// A genre placed on the plot: where it sits, and which side its name goes.
+    private struct PlottedGenre: Identifiable {
+        let id: String
+        let name: String
+        let rank: Double
+        let meanRating: Double
+        let labelAbove: Bool
+    }
+
+    private func mapAsPlot(_ q: AnalyticsQuadrant) -> some View {
+        // Rank on films, densest last, so x is an even ordering rather than a
+        // long tail bunched against the axis.
+        let ordered = q.points.sorted { $0.films < $1.films }
+        let plotted = ordered.enumerated().map { offset, point in
+            PlottedGenre(
+                id: point.name, name: point.name, rank: Double(offset),
+                meanRating: point.meanRating, labelAbove: offset.isMultiple(of: 2)
+            )
+        }
+        // The crosshair sits between the last genre below the median and the
+        // first at or above it.
+        let medianRank = Double(ordered.filter { Double($0.films) < q.filmsMedian }.count) - 0.5
+
+        let ratings = q.points.map(\.meanRating)
+        let lo = ratings.min() ?? 0
+        let hi = ratings.max() ?? 5
+        // At least a full star of range, centred on the data, so a narrow spread
+        // reads as narrow. Clamped to the rating scale at both ends.
+        let pad = max((1.0 - (hi - lo)) / 2, 0.15)
+        let domain = max(0, lo - pad)...min(5, hi + pad)
+
+        return VStack(alignment: .leading, spacing: 6) {
             Chart {
-                RuleMark(x: .value("Median films", q.filmsMedian))
-                    .foregroundStyle(Color.mkHairline)
-                RuleMark(y: .value("Median rating", q.ratingMedian))
-                    .foregroundStyle(Color.mkHairline)
-                ForEach(q.points) { point in
-                    // Double on both axes: the median RuleMarks above are
-                    // Doubles, and Swift Charts needs one plottable type per axis.
+                RuleMark(x: .value("Median", medianRank)).foregroundStyle(Color.mkHairline)
+                RuleMark(y: .value("Median rating", q.ratingMedian)).foregroundStyle(Color.mkHairline)
+                ForEach(plotted) { point in
                     PointMark(
-                        x: .value("Films", Double(point.films)),
+                        x: .value("Watched", point.rank),
                         y: .value("Mean rating", point.meanRating)
                     )
                     .foregroundStyle(
@@ -1020,66 +1374,113 @@ struct AnalyticsView: View {
                                ? Color.mkAccent.opacity(0.75)
                                : Color.mkText.opacity(0.35))
                     )
-                    .symbolSize(point.name == selectedGenre ? 220 : 110)
-                    .annotation(position: .top, spacing: 3) {
-                        if labelled.contains(point.name) {
-                            Text(point.name)
-                                .font(.caption2.weight(.semibold))
-                                .foregroundColor(point.name == selectedGenre ? .mkAccent : .mkMuted)
-                                .fixedSize()
+                    .symbolSize(point.name == selectedGenre ? 200 : 90)
+                    // Alternating sides halve how many labels can meet, and the
+                    // annotation is given the space it needs rather than being
+                    // allowed to run off the plot.
+                    .annotation(
+                        position: point.labelAbove ? .top : .bottom,
+                        spacing: 3,
+                        overflowResolution: .init(x: .fit(to: .chart), y: .fit(to: .chart))
+                    ) {
+                        Text(point.name)
+                            .font(.caption2.weight(.semibold))
+                            .foregroundColor(point.name == selectedGenre ? .mkAccent : .mkMuted)
+                            .lineLimit(1)
+                    }
+                }
+            }
+            .chartYScale(domain: domain)
+            // The x positions are ranks, so the numbers under them would be
+            // meaningless. The direction is the part worth saying.
+            .chartXAxis {
+                AxisMarks { _ in AxisGridLine().foregroundStyle(Color.mkHairline) }
+            }
+            .chartYAxis {
+                AxisMarks(position: .leading) { _ in
+                    AxisGridLine().foregroundStyle(Color.mkHairline)
+                    AxisValueLabel()
+                }
+            }
+            .frame(height: 250)
+
+            HStack {
+                Text("watched least").font(.caption2).foregroundColor(.mkMuted)
+                Spacer()
+                Text("watched most").font(.caption2).foregroundColor(.mkMuted)
+            }
+        }
+    }
+
+    // MARK: Map — bars
+
+    /// One axis, ranked, every genre named down the side.
+    ///
+    /// The form that survives a small screen best: it gives up the second
+    /// dimension and in exchange nothing is ever unreadable. Bars run either
+    /// side of the reader's median genre rating, so the length is how far from
+    /// typical the genre is rather than how big the number is — on a scale where
+    /// everything sits between 3 and 4, bars measured from zero would all look
+    /// the same length.
+    private func mapAsBars(_ q: AnalyticsQuadrant) -> some View {
+        let ordered = q.points.sorted { $0.meanRating > $1.meanRating }
+        return VStack(alignment: .leading, spacing: 6) {
+            Chart(ordered) { point in
+                BarMark(
+                    xStart: .value("From", q.ratingMedian),
+                    xEnd: .value("Mean rating", point.meanRating),
+                    y: .value("Genre", point.name)
+                )
+                .foregroundStyle(
+                    point.name == selectedGenre ? Color.mkAccent
+                        : (point.meanRating >= q.ratingMedian
+                           ? Color.mkAccent.opacity(0.65) : Color.mkText.opacity(0.3))
+                )
+                .cornerRadius(3)
+                .annotation(position: point.meanRating >= q.ratingMedian ? .trailing : .leading, spacing: 4) {
+                    Text("\(point.films)")
+                        .font(.caption2.monospacedDigit()).foregroundColor(.mkMuted)
+                }
+            }
+            .chartXAxis {
+                AxisMarks { _ in
+                    AxisGridLine().foregroundStyle(Color.mkHairline)
+                    AxisValueLabel()
+                }
+            }
+            .chartYAxis {
+                AxisMarks(position: .leading) { value in
+                    AxisValueLabel {
+                        if let name = value.as(String.self) {
+                            Text(name)
+                                .font(.caption)
+                                .foregroundColor(name == selectedGenre ? .mkAccent : .mkText)
                         }
                     }
                 }
             }
-            .chartXAxis { AxisMarks { _ in
-                AxisGridLine().foregroundStyle(Color.mkHairline)
-                AxisValueLabel()
-            } }
-            .chartYAxis { AxisMarks(position: .leading) { _ in
-                AxisGridLine().foregroundStyle(Color.mkHairline)
-                AxisValueLabel()
-            } }
-            // Taller than it was. The labels need somewhere to sit that is not
-            // on top of another point.
-            .frame(height: 260)
-            .padding(.top, 6)
-
-            // Every genre on the map, including the ones the chart leaves
-            // unnamed. Tapping one names and highlights it, which is how the
-            // detail survives having been taken off the plot.
-            ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: 6) {
-                    ForEach(q.points) { point in
-                        Button {
+            // Grows with the number of genres rather than squeezing them: a
+            // fixed height is what made every other form of this unreadable.
+            .frame(height: max(CGFloat(ordered.count) * 26 + 30, 140))
+            .chartOverlay { proxy in
+                // Tapping a bar selects it, so this form drills the same way the
+                // other two do. The tap is in the overlay's coordinates and the
+                // chart answers in the plot's, so it has to be resolved through
+                // the geometry rather than used directly.
+                GeometryReader { geometry in
+                    Rectangle().fill(.clear).contentShape(Rectangle())
+                        .onTapGesture { location in
+                            guard let plotFrame = proxy.plotFrame else { return }
+                            let y = location.y - geometry[plotFrame].origin.y
+                            guard let name = proxy.value(atY: y, as: String.self) else { return }
                             withAnimation(.easeOut(duration: 0.18)) {
-                                selectedGenre = selectedGenre == point.name ? nil : point.name
+                                selectedGenre = selectedGenre == name ? nil : name
                             }
-                        } label: {
-                            Text(point.name)
-                                .font(.caption.weight(.semibold))
-                                .foregroundColor(point.name == selectedGenre ? .mkOnAccent : .mkMuted)
-                                .padding(.horizontal, 10).padding(.vertical, 5)
-                                .background(
-                                    point.name == selectedGenre ? Color.mkAccent : Color.mkSurface,
-                                    in: Capsule()
-                                )
                         }
-                        .buttonStyle(.plain)
-                        .accessibilityLabel(
-                            "\(point.name), \(point.films) films, average \(String(format: "%.1f", point.meanRating)) stars"
-                        )
-                    }
                 }
-                .padding(.horizontal, 1)
             }
-            .scrollBounceBehavior(.basedOnSize, axes: .horizontal)
 
-            if let name = selectedGenre, let point = q.points.first(where: { $0.name == name }) {
-                Text("\(point.name) — \(point.films) films, averaging \(String(format: "%.2f", point.meanRating))★")
-                    .font(.footnote).foregroundColor(.mkText)
-            } else {
-                caption("Right of the line is what you watch most; above it is what you rate best. The top-left corner is what you love but rarely reach for.")
-            }
+            caption("Bars run from your median genre rating — right of it is rated above typical for you, left of it below. The number is how many films.")
         }
     }
 
@@ -1304,8 +1705,19 @@ struct AnalyticsView: View {
     // MARK: Networking
 
     /// The signature the current view's snapshot is filed under.
-    private static func signature(dimension: String, filters: [String: String]) -> String {
-        AnalyticsSnapshot.signature(dimension: dimension, filters: filters)
+    /// The snapshot key. It now signs the whole request rather than the lens and
+    /// its filters, because the ordering changes what comes back — without it,
+    /// a snapshot taken under one ordering would seed a view asking for another.
+    private static func signature(_ params: [String: String]) -> String {
+        AnalyticsSnapshot.signature(params)
+    }
+
+    private var requestSignature: String {
+        var params = filters
+        params["dimension"] = dimension
+        params["sort"] = sort
+        params["minFilms"] = String(minFilms)
+        return Self.signature(params)
     }
 
     /// Put last session's numbers on screen before the request goes out.
@@ -1317,9 +1729,7 @@ struct AnalyticsView: View {
     /// stale-cache error is not something a reader can act on.
     @MainActor private func seedFromSnapshot() {
         guard analytics == nil,
-              let data = AnalyticsSnapshot.load(
-                  signature: Self.signature(dimension: dimension, filters: filters)
-              ),
+              let data = AnalyticsSnapshot.load(signature: requestSignature),
               let cached = try? JSONDecoder().decode(AnalyticsResponse.self, from: data)
         else { return }
         analytics = cached
@@ -1347,12 +1757,11 @@ struct AnalyticsView: View {
         do {
             var params = filters
             params["dimension"] = dimension
+            params["sort"] = sort
+            params["minFilms"] = String(minFilms)
             let fetched: (value: AnalyticsResponse, data: Data) =
                 try await APIService.shared.getWithData("/analytics", params: params, token: app.token)
-            AnalyticsSnapshot.save(
-                fetched.data,
-                signature: Self.signature(dimension: dimension, filters: filters)
-            )
+            AnalyticsSnapshot.save(fetched.data, signature: Self.signature(params))
             result = .success(fetched.value)
         } catch {
             result = .failure(error)

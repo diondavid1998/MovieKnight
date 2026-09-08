@@ -33,6 +33,8 @@ const QUADRANT_POINTS = 10;
 // Entries per lens on the overview. Three was a teaser; five is enough to
 // recognise yourself in the list without turning the page into every ranking.
 const HIGHLIGHT_DEPTH = 5;
+/** How many films the drilled-in list shows. Long enough to hold a career. */
+const FILM_LIST_DEPTH = 200;
 
 function run(db, sql, params = []) {
   return new Promise((resolve, reject) =>
@@ -71,31 +73,114 @@ function median(values) {
 function groupBy(rows, keysOf) {
   const groups = new Map();
   for (const row of rows) {
-    for (const key of keysOf(row)) {
+    for (const entry of keysOf(row)) {
+      if (!entry) continue;
+      // Two shapes go through here. A genre, a decade or a keyword is its own
+      // identity, so it arrives as a string and the label is the key. A person
+      // arrives as {key, label} because the two differ — see `toPeople`.
+      const key = typeof entry === 'string' ? entry : entry.key;
+      const label = typeof entry === 'string' ? entry : entry.label;
       if (!key) continue;
       let group = groups.get(key);
-      if (!group) { group = { key, rows: [] }; groups.set(key, group); }
+      if (!group) { group = { key, label, rows: [] }; groups.set(key, group); }
       group.rows.push(row);
     }
   }
   return groups;
 }
 
-function summarise(key, rows) {
-  const rated = rows.filter((r) => r.rating !== null).map((r) => r.rating);
-  const crowd = rows.filter((r) => r.crowdRating !== null).map((r) => r.crowdRating);
+function summarise(key, rows, label = key) {
+  // Per film, not per viewing — see `ratedFilms`. A director whose one film the
+  // reader has watched five times was otherwise counted as five ratings, which
+  // both inflated the evidence behind their average and let one film outweigh
+  // a body of work.
+  const perFilm = ratedFilms(rows);
+  const rated = perFilm.map((r) => r.rating);
+  const crowd = perFilm.filter((r) => r.crowdRating !== null).map((r) => r.crowdRating);
+  const films = new Set(rows.map((r) => r.filmKey));
   return {
     name: key,
-    films: new Set(rows.map((r) => r.filmKey)).size,
+    // What to show. Equal to `name` for everything that is its own identity;
+    // for a person it is the display name behind the id.
+    label,
+    films: films.size,
     rated: rated.length,
     meanRating: round(mean(rated)),
     crowdMean: round(mean(crowd)),
+    // Both are endorsements the star rating does not carry, and both are worth
+    // ranking on: a heart is unambiguous where a 4 is not, and returning to a
+    // film is the strongest signal a diary holds.
+    liked: new Set(rows.filter((r) => r.isLiked).map((r) => r.filmKey)).size,
+    rewatches: rows.filter((r) => r.isRewatch).length,
+  };
+}
+
+/**
+ * How much a small sample is pulled toward the reader's own average before it
+ * is ranked on rating.
+ *
+ * Sorting by a raw mean is the one thing that makes a "highest rated" list
+ * useless: a director with a single five-star film beats one with twenty at
+ * four and a half, every time, so the top of the list is always strangers.
+ * Weighting the mean by the evidence behind it fixes that without hiding
+ * anything — the entry is still listed, still shows its real average, and
+ * simply does not outrank a body of work on the strength of one viewing.
+ *
+ * At K = 4 a single 5.0 against a 3.5 average ranks as 3.8, while ten films at
+ * 4.2 rank as 4.0. Raising K would bury genuinely small bodies of work; lowering
+ * it lets one-offs back to the top. It is not applied to the displayed figure,
+ * only to the ordering.
+ */
+const SHRINK_K = 4;
+
+function shrunkMean(entry, prior) {
+  if (entry.meanRating === null || prior === null) return entry.meanRating;
+  return (entry.rated * entry.meanRating + SHRINK_K * prior) / (entry.rated + SHRINK_K);
+}
+
+/**
+ * The orderings a lens can be read in. `films` is the default because "what do
+ * I watch" is the question people arrive with; the rest exist because it is not
+ * the only question, and the counts alone were hiding the answers to the others.
+ *
+ * `needsRating` marks the ones that are meaningless on an unrated entry — those
+ * drop entries with no rating rather than sorting them as zero, which would
+ * park every unrated director at the bottom of "highest rated" as though they
+ * had been judged.
+ */
+const SORTS = {
+  films:     { title: 'Most watched', of: (e) => e.films },
+  rating:    { title: 'Highest rated', needsRating: true, of: (e, prior) => shrunkMean(e, prior) },
+  delta:     { title: 'Above your average', needsRating: true, of: (e, prior) => shrunkMean(e, prior) - prior },
+  // Where the reader and the crowd disagree. `crowdMean` has been carried on
+  // every entry since the TMDB vote average was cached and has never been
+  // ranked on: this is "who do I rate higher than everyone else does".
+  vsCrowd:   {
+    title: 'Above the crowd', needsRating: true, needsCrowd: true,
+    of: (e, prior) => (e.crowdMean === null ? null : shrunkMean(e, prior) - e.crowdMean),
+  },
+  liked:     { title: 'Most liked', of: (e) => e.liked },
+  rewatched: { title: 'Most rewatched', of: (e) => e.rewatches },
+};
+
+const DEFAULT_SORT = 'films';
+
+/** Ties break on film count, then name, so a list never reorders at random. */
+function compareBy(sort, prior) {
+  const spec = SORTS[sort] || SORTS[DEFAULT_SORT];
+  return (a, b) => {
+    const av = spec.of(a, prior);
+    const bv = spec.of(b, prior);
+    if (av === null && bv === null) return 0;
+    if (av === null) return 1;
+    if (bv === null) return -1;
+    return bv - av || b.films - a.films || String(a.name).localeCompare(String(b.name));
   };
 }
 
 function rankBy(groups, minFilms = 1) {
   return [...groups.values()]
-    .map((g) => summarise(g.key, g.rows))
+    .map((g) => summarise(g.key, g.rows, g.label))
     .filter((g) => g.films >= minFilms)
     .sort((a, b) => b.films - a.films || (b.meanRating ?? 0) - (a.meanRating ?? 0));
 }
@@ -272,6 +357,35 @@ function invalidateDiary(db, userId = null) {
   else cache.delete(Number(userId));
 }
 
+/**
+ * A person, as something that can be counted.
+ *
+ * `key` is what a history is grouped and filtered on; `label` is what a reader
+ * sees. They are different because a name is not an identity: TMDB carries more
+ * than one actor called "Vijay", and grouping on the display string merges them
+ * into one row belonging to neither. Where an id exists it decides; where it
+ * does not — a payload cached before ids were kept, or a company with no id —
+ * the name stands in, which is exactly the old behaviour for exactly the rows
+ * that used to have it.
+ *
+ * Accepts both shapes so a stale payload still renders: those rows are already
+ * counted as outstanding by the resolve queue, but they must not crash the page
+ * in the meantime.
+ */
+function toPeople(list) {
+  if (!Array.isArray(list)) return [];
+  return list.map((entry) => (
+    typeof entry === 'string'
+      ? { key: `n:${entry}`, label: entry }
+      : {
+          key: entry?.id === null || entry?.id === undefined
+            ? `n:${entry?.name || ''}`
+            : `p:${entry.id}`,
+          label: entry?.name || '',
+        }
+  )).filter((p) => p.label);
+}
+
 function mapDiaryRows(rows) {
   // Every viewing of a film carries the same payload, so parse it once and let
   // the rewatches share the result. This saves the repeated parse and, because
@@ -284,8 +398,8 @@ function mapDiaryRows(rows) {
     let parsed = null;
     try { parsed = JSON.parse(json); } catch { /* ignore */ }
     // Derived once per film for the same reason: `cast` is the largest array in
-    // the payload and every section that reads it wants only the names.
-    if (parsed) parsed.castNames = (parsed.cast || []).map((c) => c.name);
+    // the payload and every section that reads it wants the same shape.
+    if (parsed) parsed.castPeople = toPeople(parsed.cast);
     detailsByItem.set(itemId, parsed);
     return parsed;
   };
@@ -317,8 +431,8 @@ function mapDiaryRows(rows) {
       // to do.
       resolved: Boolean(details) && PAYLOAD_SENTINEL_KEY in details,
       genres: details?.genres || [],
-      directors: details?.directors || [],
-      cast: details?.castNames || [],
+      directors: toPeople(details?.directors),
+      cast: details?.castPeople || [],
       runtime: details?.runtime || null,
       language: row.original_language || null,
       // Stored for every resolved film and, until now, read by nothing.
@@ -326,10 +440,10 @@ function mapDiaryRows(rows) {
       posterUrl: details?.posterUrl || null,
       // All of these ride in on responses the app was already making and used
       // to be thrown away with the rest of the payload.
-      writers: details?.writers || [],
-      cinematographers: details?.cinematographers || [],
-      composers: details?.composers || [],
-      studios: details?.studios || [],
+      writers: toPeople(details?.writers),
+      cinematographers: toPeople(details?.cinematographers),
+      composers: toPeople(details?.composers),
+      studios: toPeople(details?.studios),
       keywords: details?.keywords || [],
       certification: details?.certification || null,
       collection: details?.collection || null,
@@ -392,18 +506,94 @@ async function readDiary(db, userId) {
   // derived array, so one parse can be handed to every reader of it.
   return rows;
 }
+/**
+ * One row per film, so a rewatch cannot vote twice.
+ *
+ * Every mean on this page used to be taken over *viewings*. A film logged three
+ * times contributed its rating three times, so the reader's own average was
+ * pulled toward whatever they rewatch — which is, by definition, what they like
+ * best. The headline said "your mean rating" and meant "your mean rating,
+ * weighted by how often you go back to something".
+ *
+ * Where a film carries several ratings (a diary entry and a rewatch scored
+ * differently) they are averaged into one, so the film speaks once.
+ *
+ * Runtime deliberately stays per viewing: "time in the dark" is time spent, and
+ * watching a film three times is three times the hours.
+ */
+function ratedFilms(rows) {
+  const byFilm = new Map();
+  for (const row of rows) {
+    if (row.rating === null) continue;
+    const existing = byFilm.get(row.filmKey);
+    // The most recent scoring wins, which is what a rating *is* on Letterboxd:
+    // one number per film, the reader's current opinion, revised in place.
+    //
+    // Averaging the log entries instead would have been worse than the bug it
+    // replaced: a 4.5 and a later 5 average to 4.75, which is not a value the
+    // half-star scale can hold, so the film would drop out of the rating
+    // histogram altogether. Undated rows keep the last one seen, which is
+    // import order — the rows arrive oldest first.
+    if (!existing || (row.watchedOn || '') >= (existing.watchedOn || '')) {
+      byFilm.set(row.filmKey, row);
+    }
+  }
+  return [...byFilm.values()];
+}
+
+/**
+ * One row per film, newest scoring first, with whether the film database ever
+ * matched it.
+ *
+ * `resolved` is the part worth showing. A film the lookup could not match
+ * contributes nothing to any genre, director or cast count, so a lens that
+ * looks short is usually short for that reason — and a film that resolved to
+ * the *wrong* title is only visible by reading the list and noticing something
+ * that does not belong.
+ */
+function buildFilmList(rows) {
+  const byFilm = new Map();
+  for (const row of rows) {
+    const existing = byFilm.get(row.filmKey);
+    if (!existing) {
+      byFilm.set(row.filmKey, {
+        name: row.name,
+        year: row.year,
+        rating: row.rating,
+        watchedOn: row.watchedOn,
+        posterUrl: row.posterUrl,
+        resolved: row.resolved,
+        viewings: 1,
+      });
+      continue;
+    }
+    existing.viewings += 1;
+    // The most recent scoring stands, as everywhere else on this page.
+    if ((row.watchedOn || '') >= (existing.watchedOn || '')) {
+      existing.rating = row.rating;
+      existing.watchedOn = row.watchedOn;
+    }
+  }
+  return [...byFilm.values()]
+    .sort((a, b) =>
+      (b.watchedOn || '').localeCompare(a.watchedOn || '')
+      || String(a.name).localeCompare(String(b.name)))
+    .slice(0, FILM_LIST_DEPTH);
+}
+
 function buildSummary(rows) {
   const films = new Set(rows.map((r) => r.filmKey));
-  const rated = rows.filter((r) => r.rating !== null);
+  const rated = ratedFilms(rows);
   const dated = rows.filter((r) => r.watchedOn).map((r) => r.watchedOn).sort();
   const runtimes = rows.filter((r) => r.runtime).map((r) => r.runtime);
-  const paired = rows.filter((r) => r.rating !== null && r.crowdRating !== null);
+  const paired = rated.filter((r) => r.crowdRating !== null);
   const userMean = mean(rated.map((r) => r.rating));
   const crowdMean = mean(paired.map((r) => r.crowdRating));
 
   return {
     films: films.size,
     viewings: rows.length,
+    // Films you have rated, not ratings you have given.
     rated: rated.length,
     meanRating: round(userMean),
     // Only over the films where both exist — otherwise the two means describe
@@ -419,7 +609,10 @@ function buildSummary(rows) {
 }
 
 function buildRating(rows) {
-  const rated = rows.filter((r) => r.rating !== null);
+  // The histogram's buckets are labelled `films` and used to count viewings, so
+  // a film rated on two separate log entries stood in two columns at once and
+  // the bars added up to more films than the reader owns.
+  const rated = ratedFilms(rows);
   const buckets = [];
   for (let star = 0.5; star <= 5.0001; star += 0.5) {
     const value = round(star, 1);
@@ -432,15 +625,24 @@ function buildRating(rows) {
 
   const paired = rated.filter((r) => r.crowdRating !== null);
   const deltas = paired
-    .map((r) => ({ name: r.name, year: r.year, rating: r.rating, crowd: round(r.crowdRating), delta: round(r.rating - r.crowdRating) }))
-    .sort((a, b) => b.delta - a.delta);
+    .map((r) => ({ name: r.name, year: r.year, rating: round(r.rating), crowd: round(r.crowdRating), delta: round(r.rating - r.crowdRating) }))
+    .sort((a, b) => b.delta - a.delta || String(a.name).localeCompare(String(b.name)));
 
   return {
     histogram: buckets,
     mode: buckets.reduce((best, b) => (b.films > (best?.films ?? -1) ? b : best), null),
     byYear,
     hottestTakes: { above: deltas.slice(0, 5), below: deltas.slice(-5).reverse() },
-    highest: rated.filter((r) => r.rating >= 4.5).slice(0, TOP_N).map((r) => ({ name: r.name, year: r.year, rating: r.rating })),
+    // Sorted. This was `filter(...).slice(0, TOP_N)` over the raw rows, which
+    // is not "your highest rated" but "the first twelve rows at 4.5 or above,
+    // in whatever order the database returned them" — and a film logged twice
+    // appeared twice. Per film, highest first, ties broken by name so the list
+    // is the same on every load.
+    highest: rated
+      .filter((r) => r.rating >= 4.5)
+      .sort((a, b) => b.rating - a.rating || String(a.name).localeCompare(String(b.name)))
+      .slice(0, TOP_N)
+      .map((r) => ({ name: r.name, year: r.year, rating: round(r.rating) })),
   };
 }
 
@@ -489,10 +691,17 @@ function buildEras(rows) {
  * on that reads "161 films on 13 February", which is a data-entry session
  * described as a viewing.
  *
- * Rewatch counts went the same way, and for the first reason rather than the
- * second: they were reportable, just not wanted. `is_rewatch` is still parsed
- * and stored — it costs nothing to keep, and a model trained on this history
- * later would want to know a film was worth returning to.
+ * Rewatch counts went the same way at first, and for the first reason rather
+ * than the second: they were reportable, just not wanted. That has since
+ * changed — they are counted per entry and a lens can be ordered by them,
+ * because returning to a film is the strongest endorsement a diary holds and
+ * the star rating does not carry it.
+ *
+ * What stays out is any headline built on the flag. "You rewatch 12% of what
+ * you see" is a claim about the reader, and it would be measured against a
+ * history where most films were never logged to a diary at all — the same
+ * unreliability that keeps the watch dates out. A per-entry count behind an
+ * ordering claims nothing it cannot show.
  *
  * Tags survive because they need no date and answer a question about the films
  * themselves.
@@ -604,13 +813,21 @@ const DEFAULT_DIMENSION = 'overview';
 /** How deep a focused dimension goes. Far longer than the old top-12 teaser. */
 const DIMENSION_DEPTH = 60;
 
+function matchesPerson(list, value) {
+  return (list || []).some((p) => p.key === value || p.label === value);
+}
+
 /** The filters, and how each one tests a single diary row. */
 const FILTERS = {
   language: (row, value) => row.language === value,
   genre:    (row, value) => row.genres.includes(value),
   country:  (row, value) => row.countries.includes(value),
-  director: (row, value) => row.directors.includes(value),
-  actor:    (row, value) => row.cast.includes(value),
+  // Matches the identity key the app sends, and still matches a plain name so a
+  // hand-written query or a bookmark from before ids existed keeps working. The
+  // name path carries the old ambiguity — two people called Vijay both match —
+  // which is precisely why the app sends the key.
+  director: (row, value) => matchesPerson(row.directors, value),
+  actor:    (row, value) => matchesPerson(row.cast, value),
   tag:      (row, value) => row.tags.includes(value),
   decade:   (row, value) => decadeOf(row.year) === value,
   yearMin:  (row, value) => row.year !== null && row.year >= value,
@@ -620,10 +837,10 @@ const FILTERS = {
   // "Only the ones I scored" and its complement, which is a genuinely different
   // question on an export where a third of the history is unrated.
   rated:    (row, value) => (value === 'no' ? row.rating === null : row.rating !== null),
-  writer:   (row, value) => row.writers.includes(value),
-  cinematographer: (row, value) => row.cinematographers.includes(value),
-  composer: (row, value) => row.composers.includes(value),
-  studio:   (row, value) => row.studios.includes(value),
+  writer:   (row, value) => matchesPerson(row.writers, value),
+  cinematographer: (row, value) => matchesPerson(row.cinematographers, value),
+  composer: (row, value) => matchesPerson(row.composers, value),
+  studio:   (row, value) => matchesPerson(row.studios, value),
   keyword:  (row, value) => row.keywords.includes(value),
   certification: (row, value) => row.certification === value,
   // The two flags the export carries and nothing used to read.
@@ -678,13 +895,39 @@ function describeFilter(key, value) {
 }
 
 /** Applied filters as an ordered, labelled list the client can render directly. */
-function describeApplied(applied) {
+/** Key and label out of either shape — a bare string, or a person. */
+function entryKey(entry) { return typeof entry === 'string' ? entry : entry?.key; }
+function entryLabel(entry) { return typeof entry === 'string' ? entry : entry?.label; }
+
+/**
+ * The display name behind a filter value.
+ *
+ * A person filter carries an id, so the chip cannot be labelled from the value
+ * alone the way a genre can — the name has to come back out of the history. The
+ * first row carrying that key has it.
+ */
+function labelForValue(rows, filterKey, value) {
+  const spec = Object.entries(DIMENSIONS).find(([, d]) => d.filterKey === filterKey);
+  const keysOf = spec?.[1]?.keysOf;
+  if (!keysOf) return null;
+  for (const row of rows) {
+    for (const entry of keysOf(row)) {
+      // Only people need looking up. A genre or a decade *is* its own label, and
+      // a language is relabelled by `describeFilter` — answering for those here
+      // would hand back the raw code and undo it.
+      if (typeof entry !== 'string' && entryKey(entry) === value) return entryLabel(entry);
+    }
+  }
+  return null;
+}
+
+function describeApplied(applied, rows = []) {
   return Object.keys(FILTERS)
     .filter((key) => applied[key] !== undefined)
     .map((key) => ({
       key,
       value: String(applied[key]),
-      label: describeFilter(key, applied[key]),
+      label: labelForValue(rows, key, applied[key]) || describeFilter(key, applied[key]),
     }));
 }
 
@@ -711,21 +954,32 @@ function buildFacets(rows, applied) {
   const facet = (key, keysOf, label) => {
     const scoped = applyFilters(rows, applied, key);
     const counts = new Map();
+    const labels = new Map();
     for (const row of scoped) {
-      for (const value of keysOf(row)) {
+      for (const entry of keysOf(row)) {
+        const value = entryKey(entry);
         if (!value) continue;
-        let entry = counts.get(value);
-        if (!entry) { entry = new Set(); counts.set(value, entry); }
-        entry.add(row.filmKey);
+        if (!labels.has(value)) labels.set(value, entryLabel(entry));
+        let films = counts.get(value);
+        if (!films) { films = new Set(); counts.set(value, films); }
+        films.add(row.filmKey);
       }
     }
     const list = [...counts.entries()]
-      .map(([value, films]) => ({ value, label: label ? label(value) : value, films: films.size }))
-      .sort((a, b) => b.films - a.films || a.label.localeCompare(b.label));
+      .map(([value, films]) => ({
+        value,
+        label: label ? label(value) : (labels.get(value) ?? value),
+        films: films.size,
+      }))
+      .sort((a, b) => b.films - a.films || String(a.label).localeCompare(String(b.label)));
     // A value the user has already picked stays listed even when the other
     // filters have counted it down to nothing, or it could never be cleared.
     if (applied[key] !== undefined && !list.some((o) => o.value === applied[key])) {
-      list.unshift({ value: applied[key], label: label ? label(applied[key]) : applied[key], films: 0 });
+      list.unshift({
+        value: applied[key],
+        label: label ? label(applied[key]) : (labels.get(applied[key]) ?? applied[key]),
+        films: 0,
+      });
     }
     return list;
   };
@@ -754,18 +1008,40 @@ function buildFacets(rows, applied) {
  * accounts for, and how it was rated against the reader's own average. `best`
  * and `worst` come off the same ranking so the two ends are measured alike.
  */
-function buildBreakdown(dimension, rows, overallMean) {
+function buildBreakdown(dimension, rows, overallMean, sort = DEFAULT_SORT, minFilms = 1) {
   const spec = DIMENSIONS[dimension];
   if (!spec || !spec.keysOf) return null;
+
+  const sortId = SORTS[sort] ? sort : DEFAULT_SORT;
+  const sortSpec = SORTS[sortId];
 
   const pool = spec.needsResolved ? rows.filter((r) => r.resolved) : rows;
   const ranked = rankBy(groupBy(pool, spec.keysOf)).map((entry) => ({
     ...entry,
-    label: spec.label ? spec.label(entry.name) : entry.name,
+    // The lens may relabel (a language code becomes "Japanese"); otherwise the
+    // group's own label, which for a person is their name rather than their id.
+    label: spec.label ? spec.label(entry.name) : entry.label,
     delta: entry.meanRating !== null && overallMean !== null
       ? round(entry.meanRating - overallMean)
       : null,
+    // What the reader sees against the crowd, rounded for display. The ordering
+    // uses the weighted figure; this is the plain difference.
+    crowdDelta: entry.meanRating !== null && entry.crowdMean !== null
+      ? round(entry.meanRating - entry.crowdMean)
+      : null,
   }));
+
+  // A rating sort drops the unrated rather than ordering them as zero: an
+  // unrated director has not been judged badly, they have not been judged.
+  // Every sort honours the floor, so "highest rated" over three films and over
+  // ten are both reachable and neither is the only option.
+  const eligible = ranked.filter((e) => {
+    if (e.films < minFilms) return false;
+    if (sortSpec.needsRating && e.meanRating === null) return false;
+    if (sortSpec.needsCrowd && e.crowdMean === null) return false;
+    return true;
+  });
+  const entries = [...eligible].sort(compareBy(sortId, overallMean));
 
   const byDelta = ranked
     .filter((e) => e.delta !== null && e.films >= MIN_FILMS_FOR_AFFINITY)
@@ -779,7 +1055,14 @@ function buildBreakdown(dimension, rows, overallMean) {
     // of its own and drill-down is just "add a filter".
     filterKey: spec.filterKey || null,
     total: ranked.length,
-    entries: ranked.slice(0, DIMENSION_DEPTH),
+    // What the ordering currently is, what it could be, and how many entries
+    // the floor removed — so the page can say why a name is missing rather
+    // than leaving the reader to wonder.
+    sort: sortId,
+    sorts: Object.entries(SORTS).map(([id, s]) => ({ id, title: s.title })),
+    minFilms,
+    hidden: ranked.length - eligible.length,
+    entries: entries.slice(0, DIMENSION_DEPTH),
     best: byDelta.slice(0, TOP_N),
     worst: byDelta.slice(-TOP_N).reverse(),
     // Only meaningful where the dimension needs TMDB — say so rather than
@@ -967,6 +1250,10 @@ function buildProfile(rows) {
 async function computeAnalytics(db, userId, options = {}) {
   const dimension = DIMENSIONS[options.dimension] ? options.dimension : DEFAULT_DIMENSION;
   const applied = options.filters || {};
+  const sort = SORTS[options.sort] ? options.sort : DEFAULT_SORT;
+  // Clamped rather than rejected: a floor of 400 would empty every list, and a
+  // stale bookmark should still return a page.
+  const minFilms = Math.min(Math.max(Math.trunc(Number(options.minFilms) || 1), 1), 50);
 
   const allRows = await readDiary(db, userId);
   const rows = applyFilters(allRows, applied);
@@ -988,15 +1275,40 @@ async function computeAnalytics(db, userId, options = {}) {
   const summary = buildSummary(rows);
   const overallMean = summary.meanRating;
 
+  // The films behind whatever the filters have narrowed to.
+  //
+  // Every number on this page is a count of films the reader cannot see. That
+  // is fine until one of them looks wrong — and then there is no way to tell a
+  // thin lookup from a mis-resolved title, because the page will not say which
+  // films it counted. Drilling into an entry sets a filter, so this list is
+  // simply "what is in scope", and on a drilled-in view that is exactly the
+  // working behind the number.
+  //
+  // Only sent when something is filtered: unfiltered it would be the whole
+  // library on every request, which is a megabyte nobody asked for.
+  const filmList = Object.keys(applied).length > 0 ? buildFilmList(rows) : null;
+
   const payload = {
     dimension,
+    films: filmList,
     // Every lens the client may offer, named by the server so the two cannot
     // drift out of step.
     dimensions: Object.entries(DIMENSIONS).map(([id, spec]) => ({
       id, title: spec.title, needsLookup: Boolean(spec.needsResolved),
     })),
+    // At payload level as well as on the breakdown, because the overview has no
+    // breakdown of its own and still orders every one of its lists by this.
+    sort,
+    sorts: Object.entries(SORTS).map(([id, spec]) => ({
+      id, title: spec.title, needsRating: Boolean(spec.needsRating),
+    })),
+    minFilms,
     filters: {
-      applied: describeApplied(applied),
+      // Given the whole history rather than the filtered slice: a person filter
+      // is labelled from a row carrying that id, and the filtered slice always
+      // contains one, but the unfiltered set is the safer source when several
+      // filters interact.
+      applied: describeApplied(applied, allRows),
       // Counted against the whole history, minus each facet's own filter.
       available: buildFacets(allRows, applied),
     },
@@ -1018,7 +1330,7 @@ async function computeAnalytics(db, userId, options = {}) {
     // The headline numbers stay on every lens: they are the context the rest
     // of the view is read against, and they cost nothing to compute.
     summary,
-    breakdown: buildBreakdown(dimension, rows, overallMean),
+    breakdown: buildBreakdown(dimension, rows, overallMean, sort, minFilms),
     rating: null,
     eras: null,
     collection: null,
@@ -1063,7 +1375,9 @@ async function computeAnalytics(db, userId, options = {}) {
   // of each rather than a full ranking of any.
   if (dimension === 'overview') {
     const top = (id) => {
-      const b = buildBreakdown(id, rows, overallMean);
+      // The overview honours the chosen ordering too, so "top five of every
+      // lens, by rating" is one control rather than twelve visits.
+      const b = buildBreakdown(id, rows, overallMean, sort, minFilms);
       if (!b || !b.entries.length) return null;
       return { id, title: b.title, entries: b.entries.slice(0, HIGHLIGHT_DEPTH) };
     };
@@ -1083,6 +1397,7 @@ async function computeAnalytics(db, userId, options = {}) {
 
 module.exports = {
   parseFilters,
+  toPeople,
   DIMENSIONS,
   ensureAnalyticsTables,
   computeAnalytics,

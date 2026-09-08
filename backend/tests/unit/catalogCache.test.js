@@ -162,3 +162,46 @@ describe('readCachedCatalog language filters', () => {
     expect(result.items.map((item) => item.title).sort()).toEqual(['Hindi Title', 'Tamil Title']);
   });
 });
+
+describe('every ordering is total', () => {
+  const { buildSortExpression } = require('../../catalogCache');
+
+  // Paging is LIMIT/OFFSET, so each page re-runs the query. An ORDER BY that
+  // leaves rows tied lets the engine break that tie however it likes, and a row
+  // that lands on a different side of a page boundary between two requests is
+  // shown twice or not at all — a film in the catalog the reader never sees.
+  //
+  // This is an invariant test rather than a behavioural one on purpose. SQLite
+  // happens to scan in rowid order today, so the fault does not reproduce from
+  // the outside; it appears when the query plan changes — an index gets used,
+  // or rows are written while someone is paging. The guarantee is the fix, and
+  // the guarantee is what is asserted.
+  const SORTS = [
+    'title', 'release_date', 'release_date_asc', 'recently_added',
+    'tmdb', 'imdb', 'rotten_tomatoes', 'metacritic', 'popularity',
+    'anything-unrecognised',
+  ];
+
+  test.each(SORTS)('%s ends in the row identity', (sortBy) => {
+    const expression = buildSortExpression(sortBy);
+    const tail = expression.split(',').slice(-2).map((p) => p.trim()).join(', ');
+    expect(tail).toBe('media_type ASC, tmdb_id ASC');
+  });
+
+  test('those columns really do identify a row', async () => {
+    // The tail only breaks ties if it cannot itself repeat inside one scope.
+    // A query is already scoped to a single scope_key, so what is left of the
+    // primary key must be exactly what the ordering ends with — tmdb_id alone
+    // is not enough, because a film and a series can share a TMDB id.
+    const db = await createTestDb();
+    try {
+      const [{ sql }] = await new Promise((resolve, reject) =>
+        db.all("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'catalog_cache_entries'",
+          (e, rows) => (e ? reject(e) : resolve(rows))));
+      expect(sql.replace(/\s+/g, ' '))
+        .toContain('PRIMARY KEY (scope_key, media_type, tmdb_id)');
+    } finally {
+      await closeDb(db);
+    }
+  });
+});

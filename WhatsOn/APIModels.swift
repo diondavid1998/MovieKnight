@@ -424,6 +424,55 @@ struct BreakdownEntry: Decodable, Identifiable {
     let meanRating: Double?
     let crowdMean: Double?
     let delta: Double?
+    /// How the reader scored it against the crowd, where both are known.
+    let crowdDelta: Double?
+    /// Endorsements the star rating does not carry: hearts, and returns.
+    let liked: Int
+    let rewatches: Int
+
+    /// Defaulted so a payload from a server older than these fields still
+    /// decodes — the screen loses an ordering, not the page.
+    enum CodingKeys: String, CodingKey {
+        case name, label, films, rated, meanRating, crowdMean, delta, crowdDelta, liked, rewatches
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        name = try c.decode(String.self, forKey: .name)
+        label = try c.decode(String.self, forKey: .label)
+        films = try c.decode(Int.self, forKey: .films)
+        rated = try c.decode(Int.self, forKey: .rated)
+        meanRating = try c.decodeIfPresent(Double.self, forKey: .meanRating)
+        crowdMean = try c.decodeIfPresent(Double.self, forKey: .crowdMean)
+        delta = try c.decodeIfPresent(Double.self, forKey: .delta)
+        crowdDelta = try c.decodeIfPresent(Double.self, forKey: .crowdDelta)
+        liked = try c.decodeIfPresent(Int.self, forKey: .liked) ?? 0
+        rewatches = try c.decodeIfPresent(Int.self, forKey: .rewatches) ?? 0
+    }
+}
+
+/// One way of ordering a lens. Named by the server so the two cannot drift, the
+/// way the lens list already is.
+struct AnalyticsSort: Decodable, Identifiable, Equatable {
+    let id: String
+    let title: String
+    /// Orderings that drop unrated entries rather than ranking them as zero —
+    /// worth saying on screen, because a name going missing otherwise reads
+    /// as a bug.
+    let needsRating: Bool
+
+    enum CodingKeys: String, CodingKey { case id, title, needsRating }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try c.decode(String.self, forKey: .id)
+        title = try c.decode(String.self, forKey: .title)
+        needsRating = try c.decodeIfPresent(Bool.self, forKey: .needsRating) ?? false
+    }
+
+    init(id: String, title: String, needsRating: Bool) {
+        self.id = id; self.title = title; self.needsRating = needsRating
+    }
 }
 
 /// The focused dimension: its ranking, and the two ends of it by rating.
@@ -439,6 +488,28 @@ struct AnalyticsBreakdown: Decodable {
     let best: [BreakdownEntry]
     let worst: [BreakdownEntry]
     let needsLookup: Bool
+    /// The ordering in force, and how many entries the evidence floor removed —
+    /// so the page can say why a name is missing rather than leaving the reader
+    /// to wonder whether the import dropped it.
+    let sort: String?
+    let minFilms: Int?
+    let hidden: Int?
+}
+
+/// One film behind a number, with whether the film database ever matched it.
+///
+/// The page is otherwise entirely counts of films the reader cannot see, which
+/// is fine until one looks wrong — and then there is no way to tell a thin
+/// lookup from a title that resolved to the wrong film.
+struct AnalyticsFilm: Decodable, Identifiable {
+    var id: String { "\(name)|\(year ?? 0)" }
+    let name: String
+    let year: Int?
+    let rating: Double?
+    let watchedOn: String?
+    let posterUrl: String?
+    let resolved: Bool
+    let viewings: Int
 }
 
 /// A lens the page can be pointed at. Named by the server so the two can't drift.
@@ -524,6 +595,15 @@ struct AnalyticsHighlight: Decodable, Identifiable {
 struct AnalyticsResponse: Decodable {
     let dimension: String
     let dimensions: [AnalyticsDimension]
+    /// The ordering in force and every ordering on offer. Carried at payload
+    /// level as well as on the breakdown because the overview has no breakdown
+    /// of its own and still orders each of its lists by this.
+    let sort: String?
+    let sorts: [AnalyticsSort]?
+    let minFilms: Int?
+    /// The films in scope, sent only once something is filtered — unfiltered it
+    /// would be the whole library on every request.
+    let films: [AnalyticsFilm]?
     let filters: AnalyticsFilters
     let scope: AnalyticsScope
     let coverage: AnalyticsCoverage
@@ -919,10 +999,14 @@ enum FeedSnapshot {
 enum AnalyticsSnapshot {
     private static let store = JSONSnapshot(name: "analytics")
 
-    /// The lens and its filters, ordered so the same view always signs the same.
-    static func signature(dimension: String, filters: [String: String]) -> String {
-        let parts = filters.keys.sorted().map { "\($0)=\(filters[$0] ?? "")" }
-        return ([dimension] + parts).joined(separator: "&")
+    /// The whole request, ordered so the same view always signs the same.
+    ///
+    /// It takes the request rather than the lens and its filters because the
+    /// ordering changes what comes back too: signing without it would let a
+    /// snapshot taken under one ordering seed a view asking for another, and
+    /// the reader would see the wrong list until the response landed.
+    static func signature(_ params: [String: String]) -> String {
+        params.keys.sorted().map { "\($0)=\(params[$0] ?? "")" }.joined(separator: "&")
     }
 
     static func save(_ data: Data, signature: String) { store.save(data, signature: signature) }

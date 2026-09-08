@@ -237,6 +237,12 @@ function parseCsvParam(value) {
  * results come from the cached catalog or from the watchlist path.
  */
 function compareWatchlistItems(sortBy) {
+  // Same reason as buildSortExpression's trailing tmdb_id: a comparator that
+  // returns 0 for two rows leaves their order to the sort's own stability, and
+  // this list is re-sorted per request. `itemId` is unique, so every comparison
+  // below falls through to it and the order is the same every time.
+  const stable = (a, b) => String(a.itemId || '').localeCompare(String(b.itemId || ''));
+  const then = (cmp) => (a, b) => cmp(a, b) || stable(a, b);
   const byPopularity = (a, b) => (b.popularity || 0) - (a.popularity || 0);
   const byRating = (key) => (a, b) => {
     const delta = (b.sortableRatings?.[key] || 0) - (a.sortableRatings?.[key] || 0);
@@ -245,11 +251,11 @@ function compareWatchlistItems(sortBy) {
 
   switch (sortBy) {
     case 'title':
-      return (a, b) => String(a.title || '').localeCompare(String(b.title || ''));
+      return then((a, b) => String(a.title || '').localeCompare(String(b.title || '')));
     case 'release_date':
-      return (a, b) => String(b.releaseDate || '').localeCompare(String(a.releaseDate || ''));
+      return then((a, b) => String(b.releaseDate || '').localeCompare(String(a.releaseDate || '')));
     case 'release_date_asc':
-      return (a, b) => {
+      return then((a, b) => {
         // Undated titles sort last, matching the SQL CASE expression.
         const left = a.releaseDate || '';
         const right = b.releaseDate || '';
@@ -257,20 +263,20 @@ function compareWatchlistItems(sortBy) {
         if (!left) return 1;
         if (!right) return -1;
         return left.localeCompare(right);
-      };
+      });
     case 'recently_added':
-      return (a, b) => String(b.addedAt || '').localeCompare(String(a.addedAt || ''));
+      return then((a, b) => String(b.addedAt || '').localeCompare(String(a.addedAt || '')));
     case 'tmdb':
-      return byRating('tmdb');
+      return then(byRating('tmdb'));
     case 'imdb':
-      return byRating('imdb');
+      return then(byRating('imdb'));
     case 'rotten_tomatoes':
-      return byRating('rottenTomatoes');
+      return then(byRating('rottenTomatoes'));
     case 'metacritic':
-      return byRating('metacritic');
+      return then(byRating('metacritic'));
     case 'popularity':
     default:
-      return byPopularity;
+      return then(byPopularity);
   }
 }
 
@@ -981,6 +987,10 @@ function createApp(db, { disableRateLimit = false, rateLimitMax = null } = {}) {
       res.json(await computeAnalytics(db, req.user.id, {
         dimension: req.query.dimension,
         filters: parseFilters(req.query),
+        // How the lens is ordered, and how much evidence an entry needs before
+        // it is ranked at all. Both are validated inside computeAnalytics.
+        sort: req.query.sort,
+        minFilms: req.query.minFilms,
       }));
     } catch (e) {
       console.error('[analytics] failed:', e.message);
@@ -1334,6 +1344,17 @@ function createApp(db, { disableRateLimit = false, rateLimitMax = null } = {}) {
         hideWatched: req.query.hideWatched !== 'false',
         limit: Math.min(Math.max(1, parseInt(req.query.limit, 10) || 20), 50),
         platforms,
+        // The same narrowing the catalog page takes, spelled the same way, so
+        // the two screens' filter sheets can send identical query strings.
+        genreFilters: parseCsvParam(req.query.genreFilters),
+        languageFilters: parseCsvParam(req.query.languageFilters),
+        serviceFilters: parseCsvParam(req.query.serviceFilters)
+          // Only services the reader actually subscribes to: a filter naming
+          // one they have since dropped would otherwise return an empty deck
+          // with nothing on screen to explain it.
+          .filter((key) => platforms.includes(key)),
+        yearMin: req.query.yearMin ? parseInt(req.query.yearMin, 10) : null,
+        yearMax: req.query.yearMax ? parseInt(req.query.yearMax, 10) : null,
       });
 
       res.json(queue);
