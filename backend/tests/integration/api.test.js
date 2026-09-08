@@ -638,4 +638,56 @@ describe('sorting by what arrived most recently', () => {
       await closeDb(db);
     }
   });
+
+  test('paging through tied rows shows every film exactly once', async () => {
+    // The failure this guards against is silent and looks like nothing. Paging
+    // is LIMIT/OFFSET, so each page re-runs the query; where the ORDER BY leaves
+    // rows tied, the engine may order that tie group differently per run, and a
+    // row that crosses the page boundary between two requests is either served
+    // twice or skipped entirely — a film sitting in the catalog that the reader
+    // simply never sees.
+    //
+    // Ties are the normal case here, not an edge: one sync stamps every row it
+    // writes with the same first_seen_at, so a whole refresh lands in a single
+    // tie group.
+    const db = await createTestDb();
+    const app = createApp(db, { disableRateLimit: true });
+    try {
+      const reg = await request(app).post('/register').send({ username: 'pager', password: 'secret1' });
+      const token = reg.body.token;
+      await request(app).put('/platforms')
+        .set('Authorization', `Bearer ${token}`)
+        .send({ platforms: ['netflix'], languages: [] });
+
+      const scopeKey = 'region:US|platforms:netflix|languages:';
+      const SAME = '2026-05-01T00:00:00Z';
+      const TOTAL = 30;
+      for (let i = 1; i <= TOTAL; i += 1) {
+        await new Promise((resolve, reject) => db.run(
+          `INSERT INTO catalog_cache_entries
+             (scope_key, media_type, tmdb_id, title, popularity, updated_at, first_seen_at,
+              available_on_keys_json)
+           VALUES (?, 'movie', ?, ?, 50, ?, ?, '["netflix"]')`,
+          [scopeKey, i, `Arrived Together ${i}`, SAME, SAME],
+          (e) => (e ? reject(e) : resolve())
+        ));
+      }
+
+      // Every row shares first_seen_at, updated_at and popularity — so without
+      // a unique final key the ordering is entirely up to the engine.
+      for (const sortBy of ['recently_added', 'popularity', 'title']) {
+        const seen = [];
+        for (const page of [1, 2, 3]) {
+          const res = await request(app)
+            .get(`/movies?sortBy=${sortBy}&limit=10&page=${page}`)
+            .set('Authorization', `Bearer ${token}`);
+          seen.push(...res.body.items.map((i) => i.id));
+        }
+        expect(seen).toHaveLength(TOTAL);
+        expect(new Set(seen).size).toBe(TOTAL);
+      }
+    } finally {
+      await closeDb(db);
+    }
+  });
 });

@@ -182,3 +182,77 @@ describe('searchTitleOnTmdb', () => {
     await expect(searchTitleOnTmdb('Nobody Answered', 2012)).rejects.toThrow(/could not reach tmdb/i);
   });
 });
+
+describe('choosing between films that share a title', () => {
+  const { resetTmdbBreaker } = require('../../movieService');
+
+  beforeEach(() => {
+    global.fetch = jest.fn();
+    // The tests above deliberately make TMDB fail, which trips the breaker for
+    // the module. Without this, every request here is refused before it is sent.
+    resetTmdbBreaker();
+  });
+  afterEach(() => { delete global.fetch; });
+
+  it('prefers the exact year over a more popular neighbour', async () => {
+    // TMDB returns results by popularity, and the old rule took the first one
+    // inside a ±1-year window. A one-word title that is also an ordinary word
+    // is exactly where that goes wrong: the reader's 2023 film loses to a
+    // better-known 2022 film of the same name, and every genre, director and
+    // actor then counted from that row belongs to somebody else.
+    global.fetch.mockResolvedValue(
+      jsonResponse({
+        results: [
+          { media_type: 'movie', id: 111, title: 'Leo Alpha', release_date: '2022-08-01', poster_path: '/a.jpg' },
+          { media_type: 'movie', id: 222, title: 'Leo Alpha', release_date: '2023-10-19', poster_path: '/b.jpg' },
+        ],
+      })
+    );
+    const result = await searchTitleOnTmdb('Leo Alpha', 2023);
+    expect(result.itemId).toBe('movie-222');
+  });
+
+  it('prefers an exact title over a longer one that merely contains it', async () => {
+    // titleMatches accepts whole-word substrings on purpose, so a short title
+    // matches a longer one. Between the two, the exact title is the answer.
+    global.fetch.mockResolvedValue(
+      jsonResponse({
+        results: [
+          { media_type: 'movie', id: 333, title: 'Good Luck To You Leo Beta', release_date: '2023-01-01', poster_path: '/c.jpg' },
+          { media_type: 'movie', id: 444, title: 'Leo Beta', release_date: '2023-06-01', poster_path: '/d.jpg' },
+        ],
+      })
+    );
+    const result = await searchTitleOnTmdb('Leo Beta', 2023);
+    expect(result.itemId).toBe('movie-444');
+  });
+
+  it('still takes the most popular when nothing else separates them', async () => {
+    // The ranking only reorders candidates the old code already accepted; where
+    // title and year cannot decide, TMDB's own order stands.
+    global.fetch.mockResolvedValue(
+      jsonResponse({
+        results: [
+          { media_type: 'movie', id: 555, title: 'Leo Gamma', release_date: '2023-03-01', poster_path: '/e.jpg' },
+          { media_type: 'movie', id: 666, title: 'Leo Gamma', release_date: '2023-09-01', poster_path: '/f.jpg' },
+        ],
+      })
+    );
+    const result = await searchTitleOnTmdb('Leo Gamma', 2023);
+    expect(result.itemId).toBe('movie-555');
+  });
+
+  it('still accepts a neighbouring year when nothing lands on the exact one', async () => {
+    // The window exists to absorb a year's disagreement between Letterboxd and
+    // TMDB, and preferring the exact year must not close it.
+    global.fetch.mockResolvedValue(
+      jsonResponse({
+        results: [
+          { media_type: 'movie', id: 777, title: 'Leo Delta', release_date: '2024-02-01', poster_path: '/g.jpg' },
+        ],
+      })
+    );
+    const result = await searchTitleOnTmdb('Leo Delta', 2023);
+    expect(result.itemId).toBe('movie-777');
+  });
+});

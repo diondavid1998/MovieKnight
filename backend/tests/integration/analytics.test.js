@@ -137,9 +137,14 @@ describe('analytics from the CSVs alone', () => {
   test('summarises the diary', async () => {
     const { body } = await auth(request(app).get('/analytics'));
     expect(body.summary.films).toBe(5);
-    expect(body.summary.rated).toBe(5);
-    // 4.5 + 5 + 4 + 5 + 3 = 21.5 over five ratings
-    expect(body.summary.meanRating).toBe(4.3);
+    // Films rated, not ratings given. Dune is logged twice — 4.5 in January and
+    // 5 on the March rewatch — and it is one film the reader now rates 5, not
+    // two votes. Counting the viewings put every rewatch of a favourite into
+    // the average twice, which is how "your mean rating" came to mean "your
+    // mean rating, weighted by what you go back to".
+    expect(body.summary.rated).toBe(4);
+    // The later scoring of Dune stands: (5 + 5 + 4 + 3) / 4
+    expect(body.summary.meanRating).toBe(4.25);
     expect(body.summary.firstWatched).toBe('2026-01-05');
     expect(body.summary.lastWatched).toBe('2026-03-02');
   });
@@ -252,21 +257,21 @@ describe('resolving genres and people', () => {
     expect(body.summary.runtimeMinutes).toBe(720);
     // The overview points at the other lenses rather than ranking any of them.
     const dirs = body.highlights.find((h) => h.id === 'directors');
-    expect(dirs.entries[0]).toMatchObject({ name: 'Denis Villeneuve', films: 5 });
+    expect(dirs.entries[0]).toMatchObject({ label: 'Denis Villeneuve', films: 5 });
 
     const genres = await auth(request(app).get('/analytics?dimension=genres'));
     expect(genres.body.breakdown.entries[0]).toMatchObject({ name: 'Science Fiction', films: 5 });
 
     const directors = await auth(request(app).get('/analytics?dimension=directors'));
     const top = directors.body.breakdown.entries[0];
-    expect(top).toMatchObject({ name: 'Denis Villeneuve', films: 5 });
+    expect(top).toMatchObject({ label: 'Denis Villeneuve', films: 5 });
     // Every entry carries a mean and a distance from the reader's own average —
     // the count alone answers the less interesting half of the question.
     expect(top.meanRating).not.toBeNull();
     expect(top.delta).not.toBeNull();
 
     const cast = await auth(request(app).get('/analytics?dimension=cast'));
-    expect(cast.body.breakdown.entries[0]).toMatchObject({ name: 'An Actor', films: 5 });
+    expect(cast.body.breakdown.entries[0]).toMatchObject({ label: 'An Actor', films: 5 });
   });
 
   test('a film TMDB cannot find is not retried forever', async () => {
@@ -495,7 +500,7 @@ describe('the lookup finishes the job it advertises', () => {
     const after = await auth(request(app).get('/analytics?dimension=directors'));
     expect(after.body.coverage.pending).toBe(0);
     expect(after.body.coverage.resolved).toBe(2);
-    expect(after.body.breakdown.entries.map((d) => d.name)).toContain('Some Director');
+    expect(after.body.breakdown.entries.map((d) => d.label)).toContain('Some Director');
     const genres = await auth(request(app).get('/analytics?dimension=genres'));
     expect(genres.body.breakdown.entries.map((g) => g.name)).toContain('Noir');
   });
@@ -730,7 +735,7 @@ describe('lenses and filters', () => {
     const ja = await auth(request(app).get('/analytics?dimension=directors&language=ja'));
     expect(ja.body.scope).toMatchObject({ films: 2, filmsTotal: 4, filtered: true });
     // Kurosawa's two films only — and the mean is theirs, not the library's.
-    expect(ja.body.breakdown.entries.map((e) => e.name)).toEqual(['Akira Kurosawa']);
+    expect(ja.body.breakdown.entries.map((e) => e.label)).toEqual(['Akira Kurosawa']);
     expect(ja.body.summary.meanRating).toBe(4.5);
     // Applied filters arrive as labelled chips, ready to render and remove.
     expect(ja.body.filters.applied).toEqual([
@@ -742,13 +747,13 @@ describe('lenses and filters', () => {
     // The exact expectation: filter to English and the Cast list shows only
     // actors who appear in English films — the Japanese-only actor is gone.
     const en = await auth(request(app).get('/analytics?dimension=cast&language=en'));
-    const names = en.body.breakdown.entries.map((e) => e.name);
+    const names = en.body.breakdown.entries.map((e) => e.label);
     expect(names).toContain('Rooney Mara');
     expect(names).not.toContain('Toshiro Mifune');
 
     // The Cast filter options in the sheet are restricted the same way, so you
     // can't pick an actor that would empty the screen.
-    const castFacet = en.body.filters.available.cast.map((o) => o.value);
+    const castFacet = en.body.filters.available.cast.map((o) => o.label);
     expect(castFacet).toContain('Rooney Mara');
     expect(castFacet).not.toContain('Toshiro Mifune');
 
@@ -761,7 +766,7 @@ describe('lenses and filters', () => {
   test('filters compose, and numeric ones parse', async () => {
     const res = await auth(request(app).get('/analytics?language=en&ratingMin=3&dimension=cast'));
     expect(res.body.scope.films).toBe(1);          // Gamma at 3; Delta at 2 is out
-    expect(res.body.breakdown.entries.map((e) => e.name)).toEqual(['Rooney Mara']);
+    expect(res.body.breakdown.entries.map((e) => e.label)).toEqual(['Rooney Mara']);
 
     const decade = await auth(request(app).get('/analytics?decade=2010s&dimension=genres'));
     expect(decade.body.scope.films).toBe(2);
@@ -1019,7 +1024,8 @@ describe('the data that used to be thrown away', () => {
       ['keywords', 'time loop'],
     ]) {
       const res = await auth(request(app).get(`/analytics?dimension=${dimension}`));
-      expect(res.body.breakdown.entries.map((e) => e.name)).toEqual([expected]);
+      // `label` is the name; `name` is the identity key behind it.
+      expect(res.body.breakdown.entries.map((e) => e.label)).toEqual([expected]);
     }
   });
 
@@ -1270,5 +1276,216 @@ describe('ordering a lens by something other than how much you watched', () => {
     const lens = res.body.highlights.find((h) => h.id === 'directors');
     const order = lens.entries.map((e) => e.label);
     expect(order.indexOf('Steady Hand')).toBeLessThan(order.indexOf('One Hit'));
+  });
+});
+
+describe('a name is not an identity', () => {
+  // Two different actors credited under the same display name, and one actor
+  // credited under two spellings. Both happen on TMDB, and both were wrong
+  // before: the first merged two careers into one row, the second split one
+  // career across two.
+  const ROWS = [
+    'Date,Name,Year,Letterboxd URI,Rating',
+    '2026-01-01,Leo,2023,https://boxd.it/a,5',
+    '2026-01-01,Master,2021,https://boxd.it/b,4',
+    '2026-01-01,Other Film,2020,https://boxd.it/c,2',
+  ].join('\n');
+
+  // Vijay is person 5000 on both his films, credited differently on each.
+  // A different actor, person 9000, is also called "Vijay".
+  const CREDITS = {
+    Leo:          [{ id: 5000, name: 'Vijay' }],
+    Master:       [{ id: 5000, name: 'Thalapathy Vijay' }],
+    'Other Film': [{ id: 9000, name: 'Vijay' }],
+  };
+
+  beforeEach(async () => {
+    const byId = {};
+    let next = 400;
+    searchTitleOnTmdb.mockImplementation(async (name) => {
+      const id = ++next;
+      byId[id] = name;
+      return { itemId: `movie-${id}`, mediaType: 'movie', title: name, posterUrl: null };
+    });
+    fetchTitleWithCredits.mockImplementation(async (_type, id) => ({
+      id, title: byId[id], runtime: 150, vote_average: 8,
+      original_language: 'ta',
+      production_countries: [{ name: 'India' }],
+      genres: [{ name: 'Action' }],
+      external_ids: { imdb_id: `tt${id}` },
+      credits: { cast: CREDITS[byId[id]], crew: [] },
+    }));
+    await auth(request(app).post('/letterboxd/diary'))
+      .send({ files: [{ name: 'ratings.csv', text: ROWS }] });
+    await auth(request(app).post('/analytics/resolve')).send({ limit: 100 });
+  });
+
+  test('one actor under two spellings is one entry, not two', async () => {
+    const res = await auth(request(app).get('/analytics?dimension=cast'));
+    const person = res.body.breakdown.entries.filter((e) => e.name === 'p:5000');
+    expect(person).toHaveLength(1);
+    expect(person[0].films).toBe(2);
+  });
+
+  test('two actors sharing a name are two entries, not one', async () => {
+    const res = await auth(request(app).get('/analytics?dimension=cast'));
+    const keys = res.body.breakdown.entries.map((e) => e.name);
+    expect(keys).toContain('p:5000');
+    expect(keys).toContain('p:9000');
+    // Both are shown as "Vijay" or a spelling of it, and neither has three
+    // films — which is what a single merged row would have claimed.
+    expect(res.body.breakdown.entries.every((e) => e.films <= 2)).toBe(true);
+  });
+
+  test('filtering picks the one person, not everyone with the name', async () => {
+    const res = await auth(request(app).get('/analytics?dimension=genres&actor=p:5000'));
+    expect(res.body.scope.films).toBe(2);
+    // The chip says the name, not the id.
+    expect(res.body.filters.applied[0].label).toMatch(/Vijay/);
+  });
+
+  test('a plain name still filters, for a bookmark written before ids', async () => {
+    const res = await auth(request(app).get('/analytics?dimension=genres&actor=Thalapathy%20Vijay'));
+    expect(res.body.scope.films).toBe(1);
+  });
+});
+
+describe('a film votes once, however often you watch it', () => {
+  // Nine viewings of one film against one viewing each of three others. If the
+  // page counts viewings, the favourite decides every average on the screen.
+  const ROWS = ['Date,Name,Year,Letterboxd URI,Rating,Rewatch,Tags,Watched Date'];
+  for (let i = 0; i < 9; i += 1) {
+    ROWS.push(`2026-0${(i % 9) + 1}-01,Favourite,2000,https://boxd.it/f${i},5,${i ? 'Yes' : ''},,2026-0${(i % 9) + 1}-01`);
+  }
+  ROWS.push('2026-01-02,Second,2001,https://boxd.it/b,2,,,2026-01-02');
+  ROWS.push('2026-01-03,Third,2002,https://boxd.it/c,2,,,2026-01-03');
+  ROWS.push('2026-01-04,Fourth,2003,https://boxd.it/d,2,,,2026-01-04');
+
+  beforeEach(async () => {
+    await auth(request(app).post('/letterboxd/diary'))
+      .send({ files: [{ name: 'diary.csv', text: ROWS.join('\n') }] });
+  });
+
+  test('the mean is over films, not viewings', async () => {
+    const { body } = await auth(request(app).get('/analytics'));
+    expect(body.summary.films).toBe(4);
+    expect(body.summary.viewings).toBe(12);
+    expect(body.summary.rated).toBe(4);
+    // (5 + 2 + 2 + 2) / 4. Over viewings it would be (5*9 + 6) / 12 = 4.25,
+    // which says the reader is generous when in fact they rate one film highly
+    // and everything else poorly.
+    expect(body.summary.meanRating).toBe(2.75);
+  });
+
+  test('the histogram counts each film once and its bars add up', async () => {
+    const { body } = await auth(request(app).get('/analytics'));
+    const total = body.rating.histogram.reduce((sum, b) => sum + b.films, 0);
+    expect(total).toBe(4);
+    expect(body.rating.histogram.find((b) => b.rating === 5).films).toBe(1);
+    // The mode is what most films score, not what most viewings score.
+    expect(body.rating.mode.rating).toBe(2);
+  });
+
+  test('every rating stays on the half-star scale', async () => {
+    // Averaging a film's log entries would invent values like 4.75 that no
+    // bucket can hold, and the film would vanish from the chart.
+    const { body } = await auth(request(app).get('/analytics'));
+    for (const bucket of body.rating.histogram) {
+      expect((bucket.rating * 2) % 1).toBe(0);
+    }
+    for (const film of body.rating.highest) {
+      expect((film.rating * 2) % 1).toBe(0);
+    }
+  });
+
+  test('the highest-rated list is actually sorted, and lists a film once', async () => {
+    // It used to be `filter(>= 4.5).slice(0, 12)` over raw rows: the first
+    // twelve in database order, with the nine logs of Favourite among them.
+    const { body } = await auth(request(app).get('/analytics'));
+    const ratings = body.rating.highest.map((f) => f.rating);
+    expect([...ratings]).toEqual([...ratings].sort((a, b) => b - a));
+    const names = body.rating.highest.map((f) => f.name);
+    expect(new Set(names).size).toBe(names.length);
+    expect(names).toEqual(['Favourite']);
+  });
+
+  test('a lens mean is over films too', async () => {
+    // The 2000s decade holds only Favourite; the others hold one film each.
+    const { body } = await auth(request(app).get('/analytics?dimension=decades'));
+    const decade = body.breakdown.entries.find((e) => e.name === '2000s');
+    expect(decade.films).toBe(4);
+    expect(decade.rated).toBe(4);
+    expect(decade.meanRating).toBe(2.75);
+  });
+});
+
+describe('showing the working behind a number', () => {
+  const ROWS = [
+    'Date,Name,Year,Letterboxd URI,Rating',
+    '2026-01-01,Found Film,2020,https://boxd.it/a,5',
+    '2026-01-02,Missing Film,2019,https://boxd.it/b,4',
+  ].join('\n');
+
+  beforeEach(async () => {
+    let next = 800;
+    searchTitleOnTmdb.mockImplementation(async (name) => {
+      // The second film is one TMDB has nothing for, which is the case a reader
+      // most needs to see: it counts toward "films" and toward no lens at all.
+      if (name === 'Missing Film') return null;
+      const id = ++next;
+      return { itemId: `movie-${id}`, mediaType: 'movie', title: name, posterUrl: null };
+    });
+    fetchTitleWithCredits.mockImplementation(async (_type, id) => ({
+      id, title: 'Found Film', runtime: 100, vote_average: 7,
+      original_language: 'en', production_countries: [{ name: 'United States of America' }],
+      genres: [{ name: 'Drama' }], external_ids: { imdb_id: `tt${id}` },
+      credits: { cast: [{ id: 1, name: 'An Actor' }], crew: [{ id: 2, job: 'Director', name: 'A Director' }] },
+    }));
+    await auth(request(app).post('/letterboxd/diary'))
+      .send({ files: [{ name: 'ratings.csv', text: ROWS }] });
+    await auth(request(app).post('/analytics/resolve')).send({ limit: 100 });
+  });
+
+  test('an unfiltered page does not carry the whole library', async () => {
+    // It would be the entire history on every request, for a list nobody has
+    // asked to see yet.
+    const { body } = await auth(request(app).get('/analytics'));
+    expect(body.films).toBeNull();
+  });
+
+  test('drilling into a person lists the films counted for them', async () => {
+    const lens = await auth(request(app).get('/analytics?dimension=directors'));
+    const director = lens.body.breakdown.entries[0];
+    expect(director.label).toBe('A Director');
+
+    const drilled = await auth(request(app).get(`/analytics?director=${encodeURIComponent(director.name)}`));
+    expect(drilled.body.films.map((f) => f.name)).toEqual(['Found Film']);
+    expect(drilled.body.films[0].rating).toBe(5);
+  });
+
+  test('a film the database never matched is listed and marked', async () => {
+    // Without this the reader cannot tell a short lens from a wrong one: an
+    // unmatched film counts toward "films" and toward no genre, director or
+    // actor, and nothing on the page said so.
+    const { body } = await auth(request(app).get('/analytics?ratingMin=1'));
+    const byName = Object.fromEntries(body.films.map((f) => [f.name, f]));
+    expect(byName['Found Film'].resolved).toBe(true);
+    expect(byName['Missing Film'].resolved).toBe(false);
+  });
+
+  test('each film appears once however many times it was watched', async () => {
+    const REWATCHED = [
+      'Date,Name,Year,Letterboxd URI,Rating,Rewatch,Tags,Watched Date',
+      '2026-01-01,Found Film,2020,https://boxd.it/a,4,,,2026-01-01',
+      '2026-02-01,Found Film,2020,https://boxd.it/c,5,Yes,,2026-02-01',
+    ].join('\n');
+    await auth(request(app).post('/letterboxd/diary'))
+      .send({ files: [{ name: 'diary.csv', text: REWATCHED }] });
+
+    const { body } = await auth(request(app).get('/analytics?ratingMin=1'));
+    expect(body.films).toHaveLength(1);
+    expect(body.films[0].viewings).toBe(2);
+    // The later scoring, as everywhere else.
+    expect(body.films[0].rating).toBe(5);
   });
 });

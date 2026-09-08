@@ -1037,27 +1037,51 @@ function toSortableRating(value) {
   return null;
 }
 
+/**
+ * Every ordering ends in `tmdb_id`, and that is not decoration.
+ *
+ * Results are paged with LIMIT/OFFSET, which re-runs the whole query per page.
+ * If the ORDER BY leaves rows tied, SQLite may break the tie differently on
+ * each run, and a row that moves across the page boundary between two requests
+ * is either **shown twice or never shown at all**. Nothing about that looks like
+ * a bug from the outside: the reader sees a duplicate, or simply never sees a
+ * film that is sitting in the catalog.
+ *
+ * Ties are not rare here — they are the normal case for several of these
+ * columns. `recently_added` is the worst: a sync stamps every row it writes
+ * with the same `first_seen_at`, so one refresh can leave several hundred rows
+ * in a single tie group, which is most of a page either side of every boundary.
+ * `tmdb_id` is unique per row, so appending it makes each ordering total.
+ */
+/**
+ * `media_type` as well as `tmdb_id`, because the primary key is
+ * (scope_key, media_type, tmdb_id): a query is already scoped to one
+ * scope_key, but a film and a series can share a TMDB id, so the number alone
+ * does not identify a row.
+ */
+const STABLE = 'media_type ASC, tmdb_id ASC';
+
 function buildSortExpression(sortBy) {
   switch (sortBy) {
     case 'title':
-      return 'title COLLATE NOCASE ASC';
+      return `title COLLATE NOCASE ASC, ${STABLE}`;
     case 'release_date':
-      return 'release_date DESC';
+      return `release_date DESC, ${STABLE}`;
     case 'release_date_asc':
-      return "CASE WHEN release_date IS NULL OR release_date = '' THEN 1 ELSE 0 END ASC, release_date ASC";
+      return `CASE WHEN release_date IS NULL OR release_date = '' THEN 1 ELSE 0 END ASC, release_date ASC, ${STABLE}`;
     case 'recently_added':
-      return 'first_seen_at DESC, updated_at DESC';
+      return `first_seen_at DESC, updated_at DESC, ${STABLE}`;
     case 'tmdb':
-      return 'tmdb_rating DESC, popularity DESC';
+      return `tmdb_rating DESC, popularity DESC, ${STABLE}`;
     case 'imdb':
-      return 'rating_imdb_num DESC, popularity DESC';
+      return `rating_imdb_num DESC, popularity DESC, ${STABLE}`;
     case 'rotten_tomatoes':
-      return 'rating_rt_num DESC, popularity DESC';
+      return `rating_rt_num DESC, popularity DESC, ${STABLE}`;
     case 'metacritic':
-      return 'rating_meta_num DESC, popularity DESC';
+      return `rating_meta_num DESC, popularity DESC, ${STABLE}`;
     case 'popularity':
     default:
-      return 'popularity DESC, tmdb_rating DESC';
+      return `popularity DESC, tmdb_rating DESC, ${STABLE}`;
   }
 }
 
@@ -1487,6 +1511,7 @@ module.exports = {
   ensureCatalogTables,
   ensureScopeSynced,
   readCachedCatalog,
+  buildSortExpression,
   getWatchlistItemsWithAvailability,
   getStreamableWatchlistItems,
   invalidateWatchlistAvailability,

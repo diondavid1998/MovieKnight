@@ -87,28 +87,72 @@ function seriesFields(data) {
  * TMDB's payload reduced to what the clients actually render. Done once, on the
  * way into the cache, so a cache hit is a SELECT and a JSON.parse.
  */
+/**
+ * How deep the cast list is kept.
+ *
+ * The detail sheet draws eight; this is what the analytics page counts over, and
+ * the two are different jobs. TMDB orders cast by billing, so eight covers the
+ * leads of a small film and cuts off halfway down an ensemble — which made the
+ * Cast lens undercount everyone but a star.
+ */
+const CAST_DEPTH = 25;
+
+/**
+ * Marks which shape the people arrays are in, so a stale payload is detectable.
+ * Not read for its value — only its presence matters. See PAYLOAD_SENTINEL_KEY.
+ */
+const PEOPLE_SHAPE = 'id+name';
+
 function normalizeDetails(data, mediaType) {
-  const cast = (data.credits?.cast || []).slice(0, 8).map((person) => ({
+  // The detail sheet shows eight faces; the analytics page counts everyone the
+  // reader has watched. Slicing to eight here made a display limit into a data
+  // limit — TMDB orders cast by billing, so a supporting player in an ensemble
+  // was never counted at all, and the Cast lens was quietly wrong for every
+  // history. Twenty-five is deep enough to cover a credited speaking part
+  // without carrying the extras, and the sheet still shows its eight.
+  const cast = (data.credits?.cast || []).slice(0, CAST_DEPTH).map((person) => ({
     id: person.id,
     name: person.name,
     character: person.character || person.roles?.[0]?.character || '',
     profileUrl: person.profile_path ? `${TMDB_IMAGE_BASE}/w185${person.profile_path}` : null,
   }));
 
+  // People are stored as {id, name}, not as bare names.
+  //
+  // A name is not an identity. TMDB carries more than one person record for the
+  // same performer often enough to matter — most visibly outside Hollywood,
+  // where the same actor turns up as "Vijay", "Joseph Vijay" and "Thalapathy
+  // Vijay" on different films — and grouping a history by the display string
+  // splits one person into three entries, each looking a third the size. It
+  // fails the other way too: two different people credited under one common
+  // name merge into a single row that belongs to neither.
+  //
+  // The id was always in the response and was being dropped one step before the
+  // only code that needed it.
+  const people = (list) => {
+    const seen = new Set();
+    const out = [];
+    for (const person of list) {
+      if (!person?.name) continue;
+      // A crew member credited twice on one film (writer and director, say)
+      // must not count twice toward their own total.
+      const key = person.id ?? `name:${person.name}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      out.push({ id: person.id ?? null, name: person.name });
+    }
+    return out;
+  };
+
   const directors =
     mediaType === 'movie'
-      ? (data.credits?.crew || []).filter((m) => m.job === 'Director').map((m) => m.name)
-      : (data.created_by || []).map((m) => m.name);
+      ? people((data.credits?.crew || []).filter((m) => m.job === 'Director'))
+      : people(data.created_by || []);
 
   // The crew list arrives whole and only the director was ever read from it.
   // A film's writer, cinematographer and composer are as much a reason to have
   // watched it, and they cost nothing extra — the request already carries them.
-  const crewNames = (job) => {
-    const names = (data.credits?.crew || [])
-      .filter((m) => job.includes(m.job))
-      .map((m) => m.name);
-    return [...new Set(names)];
-  };
+  const crewNames = (job) => people((data.credits?.crew || []).filter((m) => job.includes(m.job)));
 
   // US certification, from the release_dates append. A film is released many
   // times over; the certificate is whichever US release carries one.
@@ -158,11 +202,12 @@ function normalizeDetails(data, mediaType) {
     revenue: data.revenue > 0 ? data.revenue : null,
     // The franchise a film belongs to, if any.
     collection: data.belongs_to_collection?.name || null,
-    studios: (data.production_companies || []).slice(0, 4).map((c) => c.name),
+    studios: people((data.production_companies || []).slice(0, 4)),
     // Thematic tags — 'time loop', 'based on novel'. The richest description of
     // what a film is *about* that TMDB has, and the one thing genres cannot say.
     keywords: (data.keywords?.keywords || data.keywords?.results || []).map((k) => k.name),
     certification,
+    people: PEOPLE_SHAPE,
   };
 }
 
@@ -241,7 +286,7 @@ async function getTitleDetails(db, mediaType, tmdbId, { forceRefresh = false } =
  * score, and a film with no franchise legitimately has a null collection — it
  * is the *absence of the key* that means "written before this was kept".
  */
-const REQUIRED_PAYLOAD_KEYS = ['voteAverage', 'keywords', 'writers', 'voteCount'];
+const REQUIRED_PAYLOAD_KEYS = ['voteAverage', 'keywords', 'writers', 'voteCount', 'people'];
 
 /**
  * The one key the resolve queue tests for in SQL.
@@ -253,7 +298,12 @@ const REQUIRED_PAYLOAD_KEYS = ['voteAverage', 'keywords', 'writers', 'voteCount'
  * always written even when the value is an empty array, which is what makes
  * presence a safe test.
  */
-const PAYLOAD_SENTINEL_KEY = 'keywords';
+// Bumped from 'keywords' when people gained ids. Every payload cached before
+// that carries bare name strings, which the lenses can still read but cannot
+// de-duplicate — so those rows have to be treated as outstanding and re-fetched,
+// exactly as the keywords change did. `people` is a version marker rather than
+// a field anything reads: it names the shape the people arrays are in.
+const PAYLOAD_SENTINEL_KEY = 'people';
 
 function payloadIsCurrent(payloadJson) {
   if (!payloadJson) return false;

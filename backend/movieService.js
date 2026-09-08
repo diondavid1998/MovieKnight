@@ -725,6 +725,48 @@ function titleMatches(candidate, normName) {
   return boundary(t, normName) || boundary(normName, t);
 }
 
+/**
+ * Which of several same-named films the diary row actually means.
+ *
+ * The old rule was "the first one within a year of the target", and `ordered`
+ * is TMDB's own ranking, which is popularity. That is the wrong tie-breaker for
+ * exactly the titles most likely to tie: a one-word title that is also an
+ * ordinary word. A reader logging the 2023 Tamil *Leo* is competing against
+ * every other Leo released between 2022 and 2024, and the Tamil film will not
+ * be the most popular of them worldwide — so the row silently resolved to a
+ * different film, and every genre, director and actor counted from it belonged
+ * to somebody else. Nothing about that looks wrong from the outside; the film
+ * is simply missing from its own lens.
+ *
+ * Two signals were already in the response and unused. An exact title beats a
+ * partial one — `titleMatches` deliberately accepts whole-word substrings, so
+ * "Leo" also matches "Good Luck to You, Leo Grande" — and the exact release
+ * year beats a neighbouring one, since the window exists to absorb a year's
+ * disagreement rather than to make three years equal.
+ *
+ * This ranks rather than filters: every candidate the old code would have
+ * accepted is still eligible, and TMDB's popularity still decides between
+ * candidates that are otherwise identical. It can only change which of several
+ * matches is chosen, never whether one is found.
+ */
+function bestCandidate(candidates, normName, year, inYearWindow) {
+  let best = null;
+  let bestScore = -1;
+  for (const candidate of candidates) {
+    const date = candidate.release_date || candidate.first_air_date;
+    if (!inYearWindow(date)) continue;
+    const candidateYear = parseInt(String(date || '').slice(0, 4), 10);
+    let score = 0;
+    if (normalizeTitle(candidate.title || candidate.name) === normName) score += 4;
+    if (candidateYear === year) score += 2;
+    // Strictly greater, so an earlier candidate wins a tie — which preserves
+    // TMDB's ordering, and with it the old behaviour, wherever the two signals
+    // above cannot separate two results.
+    if (score > bestScore) { bestScore = score; best = candidate; }
+  }
+  return best;
+}
+
 function shapeSearchResult(match, mediaType) {
   return {
     itemId: `${mediaType}-${match.id}`,
@@ -778,7 +820,7 @@ async function searchTitleOnTmdb(name, year) {
     ];
     const byName = ordered.filter((r) => titleMatches(r.title || r.name, normName));
 
-    const match = byName.find((r) => inYearWindow(r.release_date || r.first_air_date));
+    const match = bestCandidate(byName, normName, year, inYearWindow);
     if (match) return shapeSearchResult(match, match.media_type);
 
     // Two reasons the answer could still be out there: the title matched but
@@ -800,7 +842,11 @@ async function searchTitleOnTmdb(name, year) {
     try {
       const data = await fetchTmdb(endpoint, { query: name, [yearParam]: yearValue, language: 'en-US' });
       tmdbAnswered = true;
-      return (data.results || []).find((r) => titleMatches(r.title || r.name, normName)) || null;
+      const named = (data.results || []).filter((r) => titleMatches(r.title || r.name, normName));
+      // Already scoped to one year by the query, so only the title half of the
+      // ranking can separate these — but that half is the one that matters when
+      // a short title matches something longer.
+      return bestCandidate(named, normName, yearValue, () => true);
     } catch {
       return null;
     }

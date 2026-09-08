@@ -22,7 +22,7 @@
  *    and no rights at all.
  */
 
-const { readDiary } = require('./analytics');
+const { readDiary, toPeople } = require('./analytics');
 const { ensureAnalyticsDetails, readCachedDetails } = require('./titleCache');
 
 /** Below this many films, a mean is an anecdote. Mirrors the analytics rule. */
@@ -108,7 +108,11 @@ function buildTasteProfile(rows) {
   for (const [lens, keysOf] of Object.entries(LENSES)) {
     const byValue = new Map();
     for (const row of rows) {
-      for (const value of keysOf(row) || []) {
+      for (const entry of keysOf(row) || []) {
+        // People arrive as {key, label} and everything else as a string. The
+        // affinity table is keyed on identity either way, so that a candidate
+        // can be looked up by the same key the diary was counted under.
+        const value = typeof entry === 'string' ? entry : entry?.key;
         if (!value) continue;
         let bucket = byValue.get(value);
         if (!bucket) { bucket = { ratings: [], films: new Set(), bonus: 0 }; byValue.set(value, bucket); }
@@ -182,14 +186,19 @@ function scoreCandidate(candidate, profile, lenses, details = null) {
   const reasons = [];
   let score = 0;
 
-  const applyLens = (lens, values, kind, describe) => {
+  // Entries are strings (a genre) or people ({key, label}). Scoring uses the
+  // key; the reason on the card uses the label, because "because of p:12345"
+  // is not a reason anyone can read.
+  const applyLens = (lens, entries, kind, describe) => {
     if (!lenses.includes(lens)) return;
     const table = profile.affinities[lens] || {};
-    for (const value of values || []) {
-      const hit = value && table[value];
+    for (const entry of entries || []) {
+      const key = typeof entry === 'string' ? entry : entry?.key;
+      const label = typeof entry === 'string' ? entry : entry?.label;
+      const hit = key && table[key];
       if (!hit || hit.films < MIN_FILMS_FOR_CONFIDENCE) continue;
       score += hit.score;
-      if (hit.score > 0) reasons.push({ kind, value, detail: describe(hit) });
+      if (hit.score > 0) reasons.push({ kind, value: label, detail: describe(hit) });
     }
   };
 
@@ -200,11 +209,15 @@ function scoreCandidate(candidate, profile, lenses, details = null) {
   applyLens('decades', [decadeOf(candidate.year)], 'decade', stars);
 
   if (details) {
-    applyLens('directors', details.directors, 'director', stars);
-    applyLens('cast', details.castNames || (details.cast || []).map((c) => c.name), 'cast', stars);
-    applyLens('writers', details.writers, 'writer', stars);
+    // Through the same normaliser the diary went through, or the keys would not
+    // meet: the profile counts a director by TMDB id and a raw payload carries
+    // {id, name}. Reading the payload directly is what would silently score
+    // every crew lens as "no match".
+    applyLens('directors', toPeople(details.directors), 'director', stars);
+    applyLens('cast', toPeople(details.cast), 'cast', stars);
+    applyLens('writers', toPeople(details.writers), 'writer', stars);
     applyLens('keywords', details.keywords, 'theme', stars);
-    applyLens('studios', details.studios, 'studio', stars);
+    applyLens('studios', toPeople(details.studios), 'studio', stars);
   }
 
   // The crowd carries the whole score for a reader with no diary, and a

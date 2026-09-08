@@ -388,6 +388,37 @@ final class WhatsOnTests: XCTestCase {
         XCTAssertEqual(sorts.map(\.needsRating), [false, true, false])
     }
 
+    /// The film list is absent on an unfiltered page and present on a filtered
+    /// one, and the page has to render both.
+    func testTheFilmListIsOptional() throws {
+        let response = try decode(AnalyticsResponse.self, #"""
+        {"dimension":"overview","dimensions":[],
+         "filters":{"applied":[],"available":{"languages":[],"genres":[],"decades":[],
+                    "directors":[],"cast":[],"tags":[]}},
+         "scope":{"films":0,"filmsTotal":0,"filtered":false},
+         "coverage":{"films":0,"resolved":0,"pending":0,"unmatched":0,"needsResolution":[]},
+         "summary":{"films":0,"viewings":0,"rated":0,"meanRating":null,"runtimeMinutes":0,
+                    "tasteOffset":null,"comparedOn":0}}
+        """#)
+        XCTAssertNil(response.films)
+    }
+
+    func testAnUnmatchedFilmDecodesAsUnresolved() throws {
+        // The distinction the list exists for: a film that counts toward the
+        // totals and toward no genre, director or cast.
+        let films = try decode([AnalyticsFilm].self, #"""
+        [{"name":"Found Film","year":2020,"rating":5,"watchedOn":"2026-01-01",
+          "posterUrl":null,"resolved":true,"viewings":2},
+         {"name":"Missing Film","year":2019,"rating":null,"watchedOn":null,
+          "posterUrl":null,"resolved":false,"viewings":1}]
+        """#)
+        XCTAssertEqual(films.count, 2)
+        XCTAssertTrue(films[0].resolved)
+        XCTAssertEqual(films[0].viewings, 2)
+        XCTAssertFalse(films[1].resolved)
+        XCTAssertNil(films[1].rating)
+    }
+
     func testTheNewFacetsAreReadWhenTheServerSendsThem() throws {
         let available = try decode(AvailableFilters.self, #"""
         {"languages":[],"genres":[],"decades":[],"directors":[],"cast":[],"tags":[],
