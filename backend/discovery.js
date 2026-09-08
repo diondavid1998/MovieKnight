@@ -261,6 +261,15 @@ async function buildDiscoveryQueue(db, userId, {
   hideWatched = true,
   limit = 20,
   platforms = [],
+  // The same narrowing the catalog page offers. Applied to the slice the
+  // scoring runs over rather than to the cards it produces, so asking for
+  // Japanese films gives twenty Japanese suggestions instead of whichever of
+  // the twenty best happened to be Japanese.
+  genreFilters = [],
+  languageFilters = [],
+  serviceFilters = [],
+  yearMin = null,
+  yearMax = null,
 } = {}) {
   const diary = await readDiary(db, userId);
   const profile = buildTasteProfile(diary);
@@ -291,8 +300,19 @@ async function buildDiscoveryQueue(db, userId, {
     // A wide net: scoring re-orders it entirely, so the sort above only decides
     // which slice of the catalog is considered at all.
     pageSize: 400,
-    serviceFilters: platforms,
+    // A service filter narrows to a subset of what the reader subscribes to;
+    // with none given the whole subscription is the pool.
+    serviceFilters: serviceFilters.length ? serviceFilters : platforms,
+    languageFilters,
+    genreFilters,
+    yearMin,
+    yearMax,
     excludeWatchedForUserId: hideWatched ? userId : null,
+    // Unconditional, and not tied to hideWatched. A right swipe *adds* to the
+    // watchlist, so a card for something already on it offers the reader a
+    // thing they already have and a swipe that changes nothing. There is no
+    // setting under which that is what someone wanted.
+    excludeWatchlistForUserId: userId,
   });
 
   const candidates = items.filter((item) => {

@@ -1075,6 +1075,7 @@ async function readCachedCatalog(
     yearMin = null,
     yearMax = null,
     excludeWatchedForUserId = null,
+    excludeWatchlistForUserId = null,
   }
 ) {
   const filters = ['scope_key = ?'];
@@ -1140,6 +1141,23 @@ async function readCachedCatalog(
        )`
     );
     params.push(excludeWatchedForUserId);
+  }
+
+  // Saved-for-later, excluded separately from watched because the two are
+  // different questions and the callers want different answers. The catalog
+  // hides watched titles on request and keeps the watchlist visible — browsing
+  // is where you go to *see* what you saved. Discovery is the opposite: a right
+  // swipe adds to the watchlist, so a card for something already on it offers
+  // the reader a thing they already have and a swipe that does nothing.
+  if (excludeWatchlistForUserId !== null && excludeWatchlistForUserId !== undefined) {
+    filters.push(
+      `NOT EXISTS (
+         SELECT 1 FROM watchlist_items l
+         WHERE l.user_id = ?
+           AND l.item_id = catalog_cache_entries.media_type || '-' || CAST(catalog_cache_entries.tmdb_id AS TEXT)
+       )`
+    );
+    params.push(excludeWatchlistForUserId);
   }
 
   const whereClause = filters.join(' AND ');

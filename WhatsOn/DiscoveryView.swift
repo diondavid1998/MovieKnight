@@ -31,6 +31,22 @@ struct DiscoveryView: View {
     @State private var hideWatched = true
     @State private var showFilters = false
 
+    /// The same narrowing the catalog page offers, and the same sheets: genre,
+    /// language and year are the questions people already ask of this library,
+    /// and a second set of pickers that behaved slightly differently would be
+    /// worse than none.
+    ///
+    /// These are applied to the pool the scoring runs over rather than to the
+    /// finished cards. Filtering afterwards would give whichever of the twenty
+    /// best suggestions happened to be Horror — which is often none of them.
+    @State private var genreFilters: Set<String> = []
+    @State private var languageFilters: Set<String> = []
+    @State private var yearMin = ""
+    @State private var yearMax = ""
+    @State private var showGenres = false
+    @State private var showLanguages = false
+    @State private var showYears = false
+
     /// Past this, letting go commits the swipe.
     private let commitDistance: CGFloat = 110
 
@@ -53,6 +69,17 @@ struct DiscoveryView: View {
         .background(Color.mkBackground.ignoresSafeArea())
         .task { await load() }
         .sheet(isPresented: $showFilters) { filterSheet }
+        .sheet(isPresented: $showGenres) {
+            GenrePickerSheet(selected: $genreFilters) { Task { await load(reset: true) } }
+        }
+        .sheet(isPresented: $showLanguages) {
+            LanguagePickerSheet(selected: $languageFilters, available: app.selectedLanguages) {
+                Task { await load(reset: true) }
+            }
+        }
+        .sheet(isPresented: $showYears) {
+            YearFilterSheet(yearMin: $yearMin, yearMax: $yearMax) { Task { await load(reset: true) } }
+        }
     }
 
     // MARK: Header
@@ -74,10 +101,16 @@ struct DiscoveryView: View {
             }
             Spacer(minLength: 8)
             Button { showFilters = true } label: {
-                Image(systemName: "line.3.horizontal.decrease.circle")
+                // Filled when something is narrowing the deck, so an empty run
+                // reads as "your filters are tight" rather than "it is broken".
+                Image(systemName: activeFilterCount > 0
+                      ? "line.3.horizontal.decrease.circle.fill"
+                      : "line.3.horizontal.decrease.circle")
                     .font(.title3).foregroundColor(.mkAccent)
             }
-            .accessibilityLabel("Filters")
+            .accessibilityLabel(activeFilterCount == 0
+                                ? "Filters"
+                                : "Filters, \(activeFilterCount) active")
         }
         .padding(.horizontal, 20).padding(.top, 10).padding(.bottom, 12)
     }
@@ -176,19 +209,48 @@ struct DiscoveryView: View {
                 .font(.system(size: 44)).foregroundColor(.mkMuted)
             Text(exhausted ? "That's everything for now" : "Nothing to suggest yet")
                 .font(.title3).bold().foregroundColor(.mkText)
-            // Says what would widen it, rather than leaving a dead end.
-            Text(hideWatched
-                 ? "Try showing films you have already seen, adding a service, or importing your Letterboxd diary."
-                 : "Add a service in Settings, or import your Letterboxd diary to make these personal.")
+            // Says what would widen it, rather than leaving a dead end — and
+            // names the filters first when there are any, because that is the
+            // one cause the reader can undo in a single tap.
+            Text(emptyStateAdvice)
                 .font(.subheadline).foregroundColor(.mkMuted)
                 .multilineTextAlignment(.center)
                 .fixedSize(horizontal: false, vertical: true)
                 .padding(.horizontal, 40)
+            if activeFilterCount > 0 {
+                Button("Clear filters") {
+                    genreFilters = []; languageFilters = []
+                    yearMin = ""; yearMax = ""; mediaType = "all"
+                    Task { await load(reset: true) }
+                }
+                .font(.subheadline.weight(.semibold)).foregroundColor(.mkAccent)
+                .padding(.top, 4)
+            }
             Button("Start again") { Task { await load(reset: true) } }
                 .font(.subheadline.weight(.semibold)).foregroundColor(.mkAccent)
                 .padding(.top, 4)
             Spacer()
         }
+    }
+
+    private var emptyStateAdvice: String {
+        if activeFilterCount > 0 {
+            return "Your filters may be too narrow. Widen them, or clear them and start again."
+        }
+        return hideWatched
+            ? "Try showing films you have already seen, adding a service, or importing your Letterboxd diary."
+            : "Add a service in Settings, or import your Letterboxd diary to make these personal."
+    }
+
+    private var activeFilterCount: Int {
+        (genreFilters.isEmpty ? 0 : 1) + (languageFilters.isEmpty ? 0 : 1)
+            + ((yearMin.isEmpty && yearMax.isEmpty) ? 0 : 1)
+            + (mediaType == "all" ? 0 : 1)
+    }
+
+    private var yearLabel: String {
+        if yearMin.isEmpty && yearMax.isEmpty { return "Any year" }
+        return "\(yearMin.isEmpty ? "…" : yearMin)–\(yearMax.isEmpty ? "…" : yearMax)"
     }
 
     private var filterSheet: some View {
@@ -202,7 +264,36 @@ struct DiscoveryView: View {
                     }
                     Toggle("Hide what I've seen", isOn: $hideWatched)
                 } footer: {
-                    Text("Hiding covers your watched list, your watchlist and anything in an imported diary.")
+                    // This used to claim the watchlist was covered here. It was
+                    // not, and could not be: saved titles are excluded from the
+                    // deck always, since a right swipe is what puts them on the
+                    // list in the first place.
+                    Text("Covers your watched list and anything in an imported diary. Titles already on your watchlist are never suggested, whatever this is set to.")
+                }
+
+                // The catalog's own pickers rather than a second set: the same
+                // sheets, the same selections, the same behaviour.
+                Section {
+                    filterRow("Genres", value: genreFilters.isEmpty
+                              ? "Any" : "\(genreFilters.count) selected",
+                              icon: "theatermasks") { showFilters = false; showGenres = true }
+                    filterRow("Language", value: languageFilters.isEmpty
+                              ? "Any" : "\(languageFilters.count) selected",
+                              icon: "globe") { showFilters = false; showLanguages = true }
+                    filterRow("Year", value: yearLabel,
+                              icon: "calendar") { showFilters = false; showYears = true }
+                } footer: {
+                    Text("Narrows what the suggestions are chosen from, not just what you are shown — so twenty filtered cards, rather than however many of the top twenty happened to match.")
+                }
+
+                if activeFilterCount > 0 {
+                    Section {
+                        Button("Clear filters", role: .destructive) {
+                            genreFilters = []; languageFilters = []
+                            yearMin = ""; yearMax = ""; mediaType = "all"
+                            Task { await load(reset: true) }
+                        }
+                    }
                 }
             }
             .navigationTitle("Filters")
@@ -216,7 +307,19 @@ struct DiscoveryView: View {
                 }
             }
         }
-        .presentationDetents([.height(260)])
+    }
+
+    private func filterRow(_ title: String, value: String, icon: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            HStack {
+                Label(title, systemImage: icon)
+                Spacer()
+                Text(value).foregroundColor(.mkMuted)
+                Image(systemName: "chevron.right")
+                    .font(.caption.weight(.bold)).foregroundColor(.mkMuted.opacity(0.6))
+            }
+        }
+        .foregroundColor(.mkText)
     }
 
     // MARK: Networking
@@ -227,6 +330,12 @@ struct DiscoveryView: View {
         do {
             var params = ["mediaType": mediaType, "hideWatched": hideWatched ? "true" : "false"]
             params["limit"] = "20"
+            // Spelled exactly as the catalog spells them, so the server takes
+            // one query-string vocabulary rather than two.
+            if !genreFilters.isEmpty    { params["genreFilters"]    = genreFilters.joined(separator: ",") }
+            if !languageFilters.isEmpty { params["languageFilters"] = languageFilters.joined(separator: ",") }
+            if !yearMin.isEmpty         { params["yearMin"] = yearMin }
+            if !yearMax.isEmpty         { params["yearMax"] = yearMax }
             let response: DiscoveryResponse = try await APIService.shared.get(
                 "/discovery", params: params, token: app.token
             )

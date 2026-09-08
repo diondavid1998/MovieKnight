@@ -1338,6 +1338,17 @@ function createApp(db, { disableRateLimit = false, rateLimitMax = null } = {}) {
         hideWatched: req.query.hideWatched !== 'false',
         limit: Math.min(Math.max(1, parseInt(req.query.limit, 10) || 20), 50),
         platforms,
+        // The same narrowing the catalog page takes, spelled the same way, so
+        // the two screens' filter sheets can send identical query strings.
+        genreFilters: parseCsvParam(req.query.genreFilters),
+        languageFilters: parseCsvParam(req.query.languageFilters),
+        serviceFilters: parseCsvParam(req.query.serviceFilters)
+          // Only services the reader actually subscribes to: a filter naming
+          // one they have since dropped would otherwise return an empty deck
+          // with nothing on screen to explain it.
+          .filter((key) => platforms.includes(key)),
+        yearMin: req.query.yearMin ? parseInt(req.query.yearMin, 10) : null,
+        yearMax: req.query.yearMax ? parseInt(req.query.yearMax, 10) : null,
       });
 
       res.json(queue);

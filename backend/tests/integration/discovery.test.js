@@ -159,6 +159,39 @@ describe('the queue', () => {
     expect(list.body.items.map((i) => i.itemId)).toContain('movie-20');
   });
 
+  test('a title already on the watchlist is never suggested', async () => {
+    // The reported bug. The catalog's exclusion only ever covered watched_items,
+    // so a title saved from the Discover page — or imported from Letterboxd's
+    // watchlist.csv — kept turning up as a suggestion. A right swipe adds to the
+    // watchlist, so the card was offering the reader something they already had
+    // and a swipe that would change nothing.
+    await addCandidate({ id: 40, title: 'Already Saved' });
+    await addCandidate({ id: 41, title: 'Genuinely New' });
+
+    await auth(request(app).post('/watchlist')).send({
+      itemId: 'movie-40', mediaType: 'movie', title: 'Already Saved',
+    });
+
+    const res = await auth(request(app).get('/discovery'));
+    const titles = res.body.cards.map((c) => c.title);
+    expect(titles).not.toContain('Already Saved');
+    expect(titles).toContain('Genuinely New');
+  });
+
+  test('the watchlist is excluded even with hideWatched turned off', async () => {
+    // The two are different questions. "Show me things I have seen" is a real
+    // request; "show me things already sitting in my watchlist" is not, because
+    // saving them again is the only thing a card can do.
+    await addCandidate({ id: 45, title: 'Saved And Asked For' });
+
+    await auth(request(app).post('/watchlist')).send({
+      itemId: 'movie-45', mediaType: 'movie', title: 'Saved And Asked For',
+    });
+
+    const res = await auth(request(app).get('/discovery?hideWatched=false'));
+    expect(res.body.cards.map((c) => c.title)).not.toContain('Saved And Asked For');
+  });
+
   test('undo puts the card back and takes the watchlist entry with it', async () => {
     await addCandidate({ id: 30, title: 'Swiped By Mistake' });
 
@@ -224,6 +257,57 @@ describe('the queue', () => {
  * Tier 2 is the half that costs money, so it needs to be shown doing something
  * a cheaper tier could not — and shown *not* running when it would buy nothing.
  */
+describe('narrowing the deck', () => {
+  beforeEach(async () => {
+    await addCandidate({ id: 60, title: 'Old Japanese Drama', genres: ['Drama'], language: 'ja', year: 1954 });
+    await addCandidate({ id: 61, title: 'New English Horror', genres: ['Horror'], language: 'en', year: 2022 });
+    await addCandidate({ id: 62, title: 'New Japanese Horror', genres: ['Horror'], language: 'ja', year: 2021 });
+  });
+
+  const titles = (res) => res.body.cards.map((c) => c.title);
+
+  test('a genre filter narrows the pool the scoring runs over', async () => {
+    // Applied to the slice rather than to the finished cards, which is the part
+    // that matters: filtering afterwards would give whichever of the twenty best
+    // happened to be Horror, and could easily be none of them.
+    const res = await auth(request(app).get('/discovery?genreFilters=Horror'));
+    expect(titles(res).sort()).toEqual(['New English Horror', 'New Japanese Horror']);
+  });
+
+  test('a language filter narrows it too, and the two combine', async () => {
+    const one = await auth(request(app).get('/discovery?languageFilters=ja'));
+    expect(one.body.cards).toHaveLength(2);
+
+    const both = await auth(request(app).get('/discovery?languageFilters=ja&genreFilters=Horror'));
+    expect(titles(both)).toEqual(['New Japanese Horror']);
+  });
+
+  test('a year range narrows it', async () => {
+    const res = await auth(request(app).get('/discovery?yearMin=2000'));
+    expect(titles(res)).not.toContain('Old Japanese Drama');
+
+    const window = await auth(request(app).get('/discovery?yearMin=2022&yearMax=2022'));
+    expect(titles(window)).toEqual(['New English Horror']);
+  });
+
+  test('a service the reader does not have is ignored rather than emptying the deck', async () => {
+    // A stale filter — a service dropped since the sheet was last opened —
+    // would otherwise produce a blank screen with nothing on it to explain why.
+    const res = await auth(request(app).get('/discovery?serviceFilters=disney'));
+    expect(res.status).toBe(200);
+    expect(res.body.cards.length).toBeGreaterThan(0);
+  });
+
+  test('a filter that matches nothing says the queue is exhausted', async () => {
+    // Not an error, and not an empty list with no explanation: the screen needs
+    // to tell the difference between "nothing left" and "nothing loaded".
+    const res = await auth(request(app).get('/discovery?genreFilters=Western'));
+    expect(res.status).toBe(200);
+    expect(res.body.cards).toEqual([]);
+    expect(res.body.exhausted).toBe(true);
+  });
+});
+
 describe('the second tier', () => {
   const DIARY = [
     'Date,Name,Year,Letterboxd URI,Rating',
