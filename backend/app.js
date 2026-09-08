@@ -981,6 +981,10 @@ function createApp(db, { disableRateLimit = false, rateLimitMax = null } = {}) {
       res.json(await computeAnalytics(db, req.user.id, {
         dimension: req.query.dimension,
         filters: parseFilters(req.query),
+        // How the lens is ordered, and how much evidence an entry needs before
+        // it is ranked at all. Both are validated inside computeAnalytics.
+        sort: req.query.sort,
+        minFilms: req.query.minFilms,
       }));
     } catch (e) {
       console.error('[analytics] failed:', e.message);

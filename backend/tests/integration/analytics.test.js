@@ -166,11 +166,25 @@ describe('analytics from the CSVs alone', () => {
     expect(body.collection.topTags.map((t) => t.tag).sort()).toEqual(['epic', 'imax']);
   });
 
-  test('reports no rewatch stat, but still stores the flag', async () => {
-    // Not wanted on the page. Kept in the column because a model trained on
-    // this history later would want to know a film was worth returning to.
+  test('counts rewatches per entry, and never as a stat about the reader', async () => {
+    // This assertion used to be that the payload said "rewatch" nowhere at all.
+    // The flag was excluded for want of a use rather than for being unreliable,
+    // and ranking a lens is that use — returning to a film is the strongest
+    // endorsement a diary carries, and the star rating does not carry it.
+    //
+    // What stays excluded is any *headline* built on it. "You rewatch 12% of
+    // what you see" is a claim about the reader, and it would be measured
+    // against a history where most films were never logged to a diary at all.
+    // As a per-entry count behind an ordering it claims nothing it cannot show.
     const { body } = await auth(request(app).get('/analytics'));
-    expect(JSON.stringify(body)).not.toMatch(/rewatch/i);
+    expect(body.summary).not.toHaveProperty('rewatches');
+    expect(body.summary).not.toHaveProperty('rewatchRate');
+
+    // Dune was logged twice; the second is the rewatch, and the 2020s decade
+    // is the entry that should carry it.
+    const decades = body.highlights.find((h) => h.id === 'decades');
+    expect(decades.entries.find((e) => e.name === '2020s').rewatches).toBe(1);
+    expect(decades.entries.find((e) => e.name === '1990s').rewatches).toBe(0);
 
     const stored = await new Promise((resolve, reject) =>
       db.get('SELECT COUNT(*) AS n FROM letterboxd_entries WHERE is_rewatch = 1', [],
@@ -1134,4 +1148,127 @@ test('a history cached before the new fields reports as outstanding, not done', 
   const res = await auth(request(app).get('/analytics'));
   expect(res.body.coverage.resolved).toBe(0);
   expect(res.body.coverage.pending).toBe(1);
+});
+
+describe('ordering a lens by something other than how much you watched', () => {
+  // A history built so that "most watched" and "best rated" genuinely disagree,
+  // which is the only shape that tests an ordering at all.
+  //
+  //   Steady — eight films, every one a 4
+  //   Fluke  — one film, a 5
+  //   ten more at 2.5 by other hands, which is what drags the reader's own
+  //   average down to 3.26 and makes the two orderings differ
+  const CREW = [];
+  const ROWS = ['Date,Name,Year,Letterboxd URI,Rating'];
+  for (let i = 0; i < 8; i += 1) {
+    ROWS.push(`2026-01-01,Steady ${i},2000,https://boxd.it/s${i},4`);
+    CREW.push([`Steady ${i}`, 'Steady Hand', 6.0]);
+  }
+  ROWS.push('2026-01-01,Fluke,2000,https://boxd.it/f,5');
+  CREW.push(['Fluke', 'One Hit', 9.0]);
+  for (let i = 0; i < 10; i += 1) {
+    ROWS.push(`2026-01-01,Filler ${i},2000,https://boxd.it/x${i},2.5`);
+    CREW.push([`Filler ${i}`, 'Journeyman', 6.0]);
+  }
+  // Never rated, so it may be counted but never ranked on a rating.
+  ROWS.push('2026-01-01,Unseen,2000,https://boxd.it/u,');
+  CREW.push(['Unseen', 'Anonymous', 6.0]);
+
+  const DIRECTOR_OF = Object.fromEntries(CREW.map(([film, dir]) => [film, dir]));
+  const CROWD_OF = Object.fromEntries(CREW.map(([film, , crowd]) => [film, crowd]));
+
+  const directors = (body) => body.breakdown.entries.map((e) => e.label);
+
+  beforeEach(async () => {
+    const byId = {};
+    let next = 900;
+    searchTitleOnTmdb.mockImplementation(async (name) => {
+      const id = ++next;
+      byId[id] = name;
+      return { itemId: `movie-${id}`, mediaType: 'movie', title: name, posterUrl: null };
+    });
+    fetchTitleWithCredits.mockImplementation(async (_type, id) => ({
+      id, title: byId[id], runtime: 100,
+      vote_average: CROWD_OF[byId[id]] ?? 6.0,
+      original_language: 'en',
+      production_countries: [{ name: 'United States of America' }],
+      genres: [{ name: 'Drama' }],
+      external_ids: { imdb_id: `tt${id}` },
+      credits: { cast: [], crew: [{ job: 'Director', name: DIRECTOR_OF[byId[id]] }] },
+    }));
+    await auth(request(app).post('/letterboxd/diary'))
+      .send({ files: [{ name: 'ratings.csv', text: ROWS.join('\n') }] });
+    await auth(request(app).post('/analytics/resolve')).send({ limit: 100 });
+  });
+
+  test('still leads with the most watched when nothing is asked for', async () => {
+    const res = await auth(request(app).get('/analytics?dimension=directors'));
+    expect(res.body.breakdown.sort).toBe('films');
+    // Journeyman has ten, Steady Hand eight, and the question people arrive
+    // with is still "what do I watch".
+    expect(directors(res.body)[0]).toBe('Journeyman');
+  });
+
+  test('a body of work outranks a single five-star film', async () => {
+    // The whole point of the ordering. Sorted on the raw mean, One Hit's single
+    // 5 beats Steady Hand's eight 4s and the top of every "highest rated" list
+    // is strangers. Weighted by the evidence behind it, the eight films win.
+    const res = await auth(request(app).get('/analytics?dimension=directors&sort=rating'));
+    const order = directors(res.body);
+    expect(order.indexOf('Steady Hand')).toBeLessThan(order.indexOf('One Hit'));
+
+    // And the figure shown is still the real one — the weighting orders the
+    // list, it does not rewrite what the reader is told.
+    const steady = res.body.breakdown.entries.find((e) => e.label === 'Steady Hand');
+    const fluke = res.body.breakdown.entries.find((e) => e.label === 'One Hit');
+    expect(steady.meanRating).toBe(4);
+    expect(fluke.meanRating).toBe(5);
+  });
+
+  test('an unrated name is left out of a rating sort rather than ranked last', async () => {
+    const byFilms = await auth(request(app).get('/analytics?dimension=directors'));
+    expect(directors(byFilms.body)).toContain('Anonymous');
+
+    // Anonymous has one film and no rating. Ordering them as zero would read as
+    // "rated worst"; they have not been rated at all.
+    const byRating = await auth(request(app).get('/analytics?dimension=directors&sort=rating'));
+    expect(directors(byRating.body)).not.toContain('Anonymous');
+  });
+
+  test('ranks on the gap to the crowd, which is a different list again', async () => {
+    // Journeyman: the reader gives 2.5/5 where the crowd gives 6/10 — the
+    // reader is well under. Steady Hand: 4/5 against 6/10 — well over.
+    const res = await auth(request(app).get('/analytics?dimension=directors&sort=vsCrowd'));
+    const order = directors(res.body);
+    expect(order.indexOf('Steady Hand')).toBeLessThan(order.indexOf('Journeyman'));
+  });
+
+  test('the evidence floor removes names and says how many', async () => {
+    const res = await auth(request(app).get('/analytics?dimension=directors&sort=rating&minFilms=5'));
+    const order = directors(res.body);
+    expect(order).toContain('Steady Hand');   // eight
+    expect(order).toContain('Journeyman');    // ten
+    expect(order).not.toContain('One Hit');   // one
+    expect(res.body.breakdown.minFilms).toBe(5);
+    expect(res.body.breakdown.hidden).toBeGreaterThan(0);
+  });
+
+  test('an unknown sort falls back rather than failing', async () => {
+    // A stale bookmark, or a client newer than the server.
+    const res = await auth(request(app).get('/analytics?dimension=directors&sort=nonsense&minFilms=99999'));
+    expect(res.status).toBe(200);
+    expect(res.body.breakdown.sort).toBe('films');
+    expect(res.body.breakdown.minFilms).toBe(50);
+  });
+
+  test('the overview orders every one of its lists the same way', async () => {
+    // The overview has no breakdown of its own, so the ordering has to reach it
+    // by another route or "top five by rating" would silently stay "by count".
+    const res = await auth(request(app).get('/analytics?sort=rating'));
+    expect(res.body.sort).toBe('rating');
+    expect(res.body.sorts.map((s) => s.id)).toContain('vsCrowd');
+    const lens = res.body.highlights.find((h) => h.id === 'directors');
+    const order = lens.entries.map((e) => e.label);
+    expect(order.indexOf('Steady Hand')).toBeLessThan(order.indexOf('One Hit'));
+  });
 });

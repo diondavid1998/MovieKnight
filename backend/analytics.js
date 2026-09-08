@@ -84,12 +84,81 @@ function groupBy(rows, keysOf) {
 function summarise(key, rows) {
   const rated = rows.filter((r) => r.rating !== null).map((r) => r.rating);
   const crowd = rows.filter((r) => r.crowdRating !== null).map((r) => r.crowdRating);
+  const films = new Set(rows.map((r) => r.filmKey));
   return {
     name: key,
-    films: new Set(rows.map((r) => r.filmKey)).size,
+    films: films.size,
     rated: rated.length,
     meanRating: round(mean(rated)),
     crowdMean: round(mean(crowd)),
+    // Both are endorsements the star rating does not carry, and both are worth
+    // ranking on: a heart is unambiguous where a 4 is not, and returning to a
+    // film is the strongest signal a diary holds.
+    liked: new Set(rows.filter((r) => r.isLiked).map((r) => r.filmKey)).size,
+    rewatches: rows.filter((r) => r.isRewatch).length,
+  };
+}
+
+/**
+ * How much a small sample is pulled toward the reader's own average before it
+ * is ranked on rating.
+ *
+ * Sorting by a raw mean is the one thing that makes a "highest rated" list
+ * useless: a director with a single five-star film beats one with twenty at
+ * four and a half, every time, so the top of the list is always strangers.
+ * Weighting the mean by the evidence behind it fixes that without hiding
+ * anything — the entry is still listed, still shows its real average, and
+ * simply does not outrank a body of work on the strength of one viewing.
+ *
+ * At K = 4 a single 5.0 against a 3.5 average ranks as 3.8, while ten films at
+ * 4.2 rank as 4.0. Raising K would bury genuinely small bodies of work; lowering
+ * it lets one-offs back to the top. It is not applied to the displayed figure,
+ * only to the ordering.
+ */
+const SHRINK_K = 4;
+
+function shrunkMean(entry, prior) {
+  if (entry.meanRating === null || prior === null) return entry.meanRating;
+  return (entry.rated * entry.meanRating + SHRINK_K * prior) / (entry.rated + SHRINK_K);
+}
+
+/**
+ * The orderings a lens can be read in. `films` is the default because "what do
+ * I watch" is the question people arrive with; the rest exist because it is not
+ * the only question, and the counts alone were hiding the answers to the others.
+ *
+ * `needsRating` marks the ones that are meaningless on an unrated entry — those
+ * drop entries with no rating rather than sorting them as zero, which would
+ * park every unrated director at the bottom of "highest rated" as though they
+ * had been judged.
+ */
+const SORTS = {
+  films:     { title: 'Most watched', of: (e) => e.films },
+  rating:    { title: 'Highest rated', needsRating: true, of: (e, prior) => shrunkMean(e, prior) },
+  delta:     { title: 'Above your average', needsRating: true, of: (e, prior) => shrunkMean(e, prior) - prior },
+  // Where the reader and the crowd disagree. `crowdMean` has been carried on
+  // every entry since the TMDB vote average was cached and has never been
+  // ranked on: this is "who do I rate higher than everyone else does".
+  vsCrowd:   {
+    title: 'Above the crowd', needsRating: true, needsCrowd: true,
+    of: (e, prior) => (e.crowdMean === null ? null : shrunkMean(e, prior) - e.crowdMean),
+  },
+  liked:     { title: 'Most liked', of: (e) => e.liked },
+  rewatched: { title: 'Most rewatched', of: (e) => e.rewatches },
+};
+
+const DEFAULT_SORT = 'films';
+
+/** Ties break on film count, then name, so a list never reorders at random. */
+function compareBy(sort, prior) {
+  const spec = SORTS[sort] || SORTS[DEFAULT_SORT];
+  return (a, b) => {
+    const av = spec.of(a, prior);
+    const bv = spec.of(b, prior);
+    if (av === null && bv === null) return 0;
+    if (av === null) return 1;
+    if (bv === null) return -1;
+    return bv - av || b.films - a.films || String(a.name).localeCompare(String(b.name));
   };
 }
 
@@ -489,10 +558,17 @@ function buildEras(rows) {
  * on that reads "161 films on 13 February", which is a data-entry session
  * described as a viewing.
  *
- * Rewatch counts went the same way, and for the first reason rather than the
- * second: they were reportable, just not wanted. `is_rewatch` is still parsed
- * and stored — it costs nothing to keep, and a model trained on this history
- * later would want to know a film was worth returning to.
+ * Rewatch counts went the same way at first, and for the first reason rather
+ * than the second: they were reportable, just not wanted. That has since
+ * changed — they are counted per entry and a lens can be ordered by them,
+ * because returning to a film is the strongest endorsement a diary holds and
+ * the star rating does not carry it.
+ *
+ * What stays out is any headline built on the flag. "You rewatch 12% of what
+ * you see" is a claim about the reader, and it would be measured against a
+ * history where most films were never logged to a diary at all — the same
+ * unreliability that keeps the watch dates out. A per-entry count behind an
+ * ordering claims nothing it cannot show.
  *
  * Tags survive because they need no date and answer a question about the films
  * themselves.
@@ -754,9 +830,12 @@ function buildFacets(rows, applied) {
  * accounts for, and how it was rated against the reader's own average. `best`
  * and `worst` come off the same ranking so the two ends are measured alike.
  */
-function buildBreakdown(dimension, rows, overallMean) {
+function buildBreakdown(dimension, rows, overallMean, sort = DEFAULT_SORT, minFilms = 1) {
   const spec = DIMENSIONS[dimension];
   if (!spec || !spec.keysOf) return null;
+
+  const sortId = SORTS[sort] ? sort : DEFAULT_SORT;
+  const sortSpec = SORTS[sortId];
 
   const pool = spec.needsResolved ? rows.filter((r) => r.resolved) : rows;
   const ranked = rankBy(groupBy(pool, spec.keysOf)).map((entry) => ({
@@ -765,7 +844,24 @@ function buildBreakdown(dimension, rows, overallMean) {
     delta: entry.meanRating !== null && overallMean !== null
       ? round(entry.meanRating - overallMean)
       : null,
+    // What the reader sees against the crowd, rounded for display. The ordering
+    // uses the weighted figure; this is the plain difference.
+    crowdDelta: entry.meanRating !== null && entry.crowdMean !== null
+      ? round(entry.meanRating - entry.crowdMean)
+      : null,
   }));
+
+  // A rating sort drops the unrated rather than ordering them as zero: an
+  // unrated director has not been judged badly, they have not been judged.
+  // Every sort honours the floor, so "highest rated" over three films and over
+  // ten are both reachable and neither is the only option.
+  const eligible = ranked.filter((e) => {
+    if (e.films < minFilms) return false;
+    if (sortSpec.needsRating && e.meanRating === null) return false;
+    if (sortSpec.needsCrowd && e.crowdMean === null) return false;
+    return true;
+  });
+  const entries = [...eligible].sort(compareBy(sortId, overallMean));
 
   const byDelta = ranked
     .filter((e) => e.delta !== null && e.films >= MIN_FILMS_FOR_AFFINITY)
@@ -779,7 +875,14 @@ function buildBreakdown(dimension, rows, overallMean) {
     // of its own and drill-down is just "add a filter".
     filterKey: spec.filterKey || null,
     total: ranked.length,
-    entries: ranked.slice(0, DIMENSION_DEPTH),
+    // What the ordering currently is, what it could be, and how many entries
+    // the floor removed — so the page can say why a name is missing rather
+    // than leaving the reader to wonder.
+    sort: sortId,
+    sorts: Object.entries(SORTS).map(([id, s]) => ({ id, title: s.title })),
+    minFilms,
+    hidden: ranked.length - eligible.length,
+    entries: entries.slice(0, DIMENSION_DEPTH),
     best: byDelta.slice(0, TOP_N),
     worst: byDelta.slice(-TOP_N).reverse(),
     // Only meaningful where the dimension needs TMDB — say so rather than
@@ -967,6 +1070,10 @@ function buildProfile(rows) {
 async function computeAnalytics(db, userId, options = {}) {
   const dimension = DIMENSIONS[options.dimension] ? options.dimension : DEFAULT_DIMENSION;
   const applied = options.filters || {};
+  const sort = SORTS[options.sort] ? options.sort : DEFAULT_SORT;
+  // Clamped rather than rejected: a floor of 400 would empty every list, and a
+  // stale bookmark should still return a page.
+  const minFilms = Math.min(Math.max(Math.trunc(Number(options.minFilms) || 1), 1), 50);
 
   const allRows = await readDiary(db, userId);
   const rows = applyFilters(allRows, applied);
@@ -995,6 +1102,13 @@ async function computeAnalytics(db, userId, options = {}) {
     dimensions: Object.entries(DIMENSIONS).map(([id, spec]) => ({
       id, title: spec.title, needsLookup: Boolean(spec.needsResolved),
     })),
+    // At payload level as well as on the breakdown, because the overview has no
+    // breakdown of its own and still orders every one of its lists by this.
+    sort,
+    sorts: Object.entries(SORTS).map(([id, spec]) => ({
+      id, title: spec.title, needsRating: Boolean(spec.needsRating),
+    })),
+    minFilms,
     filters: {
       applied: describeApplied(applied),
       // Counted against the whole history, minus each facet's own filter.
@@ -1018,7 +1132,7 @@ async function computeAnalytics(db, userId, options = {}) {
     // The headline numbers stay on every lens: they are the context the rest
     // of the view is read against, and they cost nothing to compute.
     summary,
-    breakdown: buildBreakdown(dimension, rows, overallMean),
+    breakdown: buildBreakdown(dimension, rows, overallMean, sort, minFilms),
     rating: null,
     eras: null,
     collection: null,
@@ -1063,7 +1177,9 @@ async function computeAnalytics(db, userId, options = {}) {
   // of each rather than a full ranking of any.
   if (dimension === 'overview') {
     const top = (id) => {
-      const b = buildBreakdown(id, rows, overallMean);
+      // The overview honours the chosen ordering too, so "top five of every
+      // lens, by rating" is one control rather than twelve visits.
+      const b = buildBreakdown(id, rows, overallMean, sort, minFilms);
       if (!b || !b.entries.length) return null;
       return { id, title: b.title, entries: b.entries.slice(0, HIGHLIGHT_DEPTH) };
     };
