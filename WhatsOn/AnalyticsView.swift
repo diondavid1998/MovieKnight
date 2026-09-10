@@ -698,6 +698,10 @@ struct AnalyticsView: View {
                 if let profile = a.profile { profileSections(profile) }
                 if let rating = a.rating { ratingChart(rating) }
                 if let quadrant = a.quadrant { quadrantChart(quadrant) }
+                // Shown here too when saved films are waiting: the watchlist card
+                // is on this lens, and until those are looked up they are not on
+                // the real watchlist either.
+                if (a.coverage.pendingWatchlist ?? 0) > 0 { lookupPrompt(a) }
                 if let watchlist = a.watchlist { watchlistCard(watchlist) }
                 if let highlights = a.highlights { highlightCards(highlights) }
             case "ratings":
@@ -708,7 +712,7 @@ struct AnalyticsView: View {
                 if let b = a.breakdown { breakdownList(b, a) }
             default:
                 if let b = a.breakdown {
-                    if b.needsLookup && a.coverage.pending > 0 { lookupPrompt(a) }
+                    if b.needsLookup && a.coverage.totalPending > 0 { lookupPrompt(a) }
                     if a.dimension == "genres", let quadrant = a.quadrant { quadrantChart(quadrant) }
                     breakdownList(b, a)
                     if !b.best.isEmpty { deltaEnds(b) }
@@ -1564,7 +1568,9 @@ struct AnalyticsView: View {
 
     private func lookupPrompt(_ a: AnalyticsResponse) -> some View {
         VStack(alignment: .leading, spacing: 10) {
-            Text("No Letterboxd export contains a director, a cast list or a genre — those come from the film database, and only when you ask.")
+            Text(a.coverage.pending == 0
+                 ? "Films from your watchlist.csv need matching to the film database before they can join your watchlist. That happens only when you ask."
+                 : "No Letterboxd export contains a director, a cast list or a genre — those come from the film database, and only when you ask.")
                 .font(.footnote).foregroundColor(.mkMuted)
                 .fixedSize(horizontal: false, vertical: true)
             if let resolveStatus {
@@ -1574,9 +1580,9 @@ struct AnalyticsView: View {
                 }
             }
             Button {
-                Task { await resolveAll(pending: a.coverage.pending) }
+                Task { await resolveAll(pending: a.coverage.totalPending) }
             } label: {
-                Text(isResolving ? "Working…" : "Look up \(a.coverage.pending) films")
+                Text(isResolving ? "Working…" : "Look up \(a.coverage.totalPending) films")
                     .font(.subheadline.weight(.semibold))
                     .foregroundColor(.mkText)
                     .padding(.horizontal, 16).frame(height: 42)
@@ -1853,6 +1859,11 @@ struct AnalyticsView: View {
             resolveStatus = "Stopped — \(remaining) could not be looked up just now. Try again."
         } else {
             resolveStatus = "\(remaining) still to look up."
+        }
+        // The lookup is also what puts imported films on the real watchlist, so
+        // the ids the catalog draws its bookmarks from are now out of date.
+        if let resp = try? await APIService.shared.get("/watchlist", token: app.token) as WatchlistResponse {
+            app.replaceWatchlistIds((resp.items ?? []).map(\.itemId))
         }
         await load()
     }

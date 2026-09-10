@@ -465,7 +465,13 @@ struct ProfileTabView: View {
             )
             let detectedType = resp.importType ?? "watched"
             lbxImportType = lbxIntendedType  // always use the button the user pressed
-            lbxItems = resp.items.map { item in ["name": item.name, "year": item.year] }
+            // The year key is omitted rather than set to nil: a film with no
+            // release date yet is still a film the user meant to save.
+            lbxItems = resp.items.map { item -> [String: Any] in
+                var row: [String: Any] = ["name": item.name]
+                if let year = item.year { row["year"] = year }
+                return row
+            }
             lbxImportProgress = nil
             if lbxItems.isEmpty {
                 lbxImportDone = "No valid rows found in CSV"
@@ -486,32 +492,55 @@ struct ProfileTabView: View {
         var offset = 0
         var totalMatched = 0
         var totalNotFound = 0
+        var totalUnavailable = 0
+        var totalSkipped = 0
+        var failure: String?
+
+        // One token for the whole upload. A replacing watchlist import stamps
+        // every row it writes with this and deletes the rows carrying anything
+        // else only on the final batch — so an upload that dies half way leaves
+        // the old watchlist plus whatever arrived, rather than a fraction of it.
+        let importToken = UUID().uuidString
+        let replacing = lbxImportType == "watchlist"
 
         while offset < lbxItems.count {
             let chunk = Array(lbxItems[offset..<min(offset + batchSize, lbxItems.count)])
             lbxImportProgress = "Importing \(offset + chunk.count) of \(lbxItems.count)…"
 
             let encodableChunk: [[String: Any]] = chunk.compactMap { item in
-                guard let name = item["name"] as? String, let year = item["year"] as? Int else { return nil }
-                return ["name": name, "year": year]
+                guard let name = item["name"] as? String else { return nil }
+                // The year is optional: Letterboxd leaves it blank for a film
+                // with no release date yet, and dropping the row here would
+                // lose exactly the titles a watchlist is most likely to hold.
+                if let year = item["year"] as? Int { return ["name": name, "year": year] }
+                return ["name": name]
             }
 
+            let isLastBatch = offset + batchSize >= lbxItems.count
+
             do {
-                // A watchlist upload supersedes the saved list, so the first
-                // batch clears it and the rest append. A watched upload is a
-                // history and only ever merges, so it never sets this.
                 var body: [String: Any] = ["items": encodableChunk, "importType": lbxImportType]
-                if lbxImportType == "watchlist" && offset == 0 {
+                if replacing {
                     body["replaceExisting"] = true
+                    body["importToken"] = importToken
+                    // Only the last batch asks for the swap.
+                    if isLastBatch { body["finalise"] = true }
                 }
                 let resp: LetterboxdImportResponse = try await APIService.shared.post(
                     "/import/letterboxd",
                     body: body,
                     token: app.token
                 )
-                totalMatched  += resp.matched ?? 0
-                totalNotFound += resp.notFound ?? 0
-            } catch { break }
+                totalMatched     += resp.matched ?? 0
+                totalNotFound    += resp.notFound ?? 0
+                totalUnavailable += resp.unavailable ?? 0
+                totalSkipped     += resp.skippedAlreadyWatched ?? 0
+            } catch {
+                // Reported, not swallowed. This used to `break` in silence, so a
+                // network blip mid-import looked exactly like a finished one.
+                failure = (error as? APIError)?.errorDescription ?? "the connection dropped"
+                break
+            }
 
             offset += batchSize
         }
@@ -530,7 +559,17 @@ struct ProfileTabView: View {
         }
 
         lbxImportProgress = nil
-        lbxImportDone = "✓ Imported \(totalMatched) of \(lbxItems.count) movies\(totalNotFound > 0 ? " (\(totalNotFound) not found)" : "")"
+        if let failure {
+            let kept = replacing ? " Your existing watchlist was left alone." : ""
+            lbxImportDone = "⚠ Stopped after \(totalMatched) of \(lbxItems.count) — \(failure).\(kept) Try again."
+        } else {
+            var notes: [String] = []
+            if totalNotFound > 0 { notes.append("\(totalNotFound) not found") }
+            if totalUnavailable > 0 { notes.append("\(totalUnavailable) could not be looked up") }
+            if totalSkipped > 0 { notes.append("\(totalSkipped) already watched") }
+            let detail = notes.isEmpty ? "" : " (\(notes.joined(separator: ", ")))"
+            lbxImportDone = "✓ Imported \(totalMatched) of \(lbxItems.count) movies\(detail)"
+        }
         lbxItems = []
     }
 

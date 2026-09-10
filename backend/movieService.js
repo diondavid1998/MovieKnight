@@ -795,7 +795,14 @@ async function searchTitleOnTmdb(name, year) {
   const normName = normalizeTitle(name);
   if (!normName) return null;
 
+  // Letterboxd leaves Year blank for a film with no release date yet, which is
+  // most of what sits at the top of a watchlist. Those rows used to be thrown
+  // away before the search; now they get one, and the year half of the ranking
+  // simply does not apply.
+  const hasYear = Number.isFinite(year);
+
   const inYearWindow = (dateString) => {
+    if (!hasYear) return true;
     const resultYear = parseInt(String(dateString || '').slice(0, 4), 10);
     if (!Number.isFinite(resultYear)) return false;
     return Math.abs(resultYear - year) <= 1;
@@ -840,24 +847,33 @@ async function searchTitleOnTmdb(name, year) {
 
   const trySearch = async (endpoint, yearParam, yearValue) => {
     try {
+      // A null year needs no guard here: fetchTmdb drops null, undefined and
+      // empty params when it builds the URL, so the unscoped fallback simply
+      // omits the year. Re-checking it here would be a branch nothing can take.
       const data = await fetchTmdb(endpoint, { query: name, [yearParam]: yearValue, language: 'en-US' });
       tmdbAnswered = true;
       const named = (data.results || []).filter((r) => titleMatches(r.title || r.name, normName));
       // Already scoped to one year by the query, so only the title half of the
       // ranking can separate these — but that half is the one that matters when
-      // a short title matches something longer.
+      // a short title matches something longer. An unscoped search has not even
+      // that, so the title is all there is to go on.
       return bestCandidate(named, normName, yearValue, () => true);
     } catch {
       return null;
     }
   };
 
-  for (const yr of [year, year - 1, year + 1]) {
+  // Without a year there is nothing to scope a fallback to, and asking TMDB for
+  // primary_release_year=null is a request that can only come back wrong. One
+  // unscoped search per media type is the whole of the fallback.
+  const movieYears = hasYear ? [year, year - 1, year + 1] : [null];
+  for (const yr of movieYears) {
     const match = await trySearch('/search/movie', 'primary_release_year', yr);
     if (match) return shapeSearchResult(match, 'movie');
   }
 
-  for (const yr of [year, year - 1, year + 1]) {
+  const tvYears = hasYear ? [year, year - 1, year + 1] : [null];
+  for (const yr of tvYears) {
     const match = await trySearch('/search/tv', 'first_air_date_year', yr);
     if (match) return shapeSearchResult(match, 'tv');
   }

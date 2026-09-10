@@ -39,6 +39,12 @@ const {
   seriesTmdbId,
 } = require('./currentlyWatching');
 const { readExport, filmKey } = require('./letterboxd');
+const {
+  claimForList,
+  claimForImport,
+  alreadyWatched,
+  finaliseWatchlistImport,
+} = require('./lists');
 const { computeAnalytics, parseFilters, invalidateDiary } = require('./analytics');
 const { searchTitleOnTmdb, searchCatalog, fetchTitlesByPerson, isTmdbUnavailable } = require('./movieService');
 
@@ -779,22 +785,27 @@ function createApp(db, { disableRateLimit = false, rateLimitMax = null } = {}) {
   });
 
   // ── Watched list POST ─────────────────────────────────────────────────────
-  app.post('/watched', authenticateToken, (req, res) => {
+  app.post('/watched', authenticateToken, async (req, res) => {
     const { itemId, mediaType, title, posterUrl } = req.body || {};
     if (!itemId) return res.status(400).json({ error: 'itemId required' });
-    db.run(
-      'INSERT OR IGNORE INTO watched_items (user_id, item_id, media_type, title, poster_url) VALUES (?, ?, ?, ?, ?)',
-      [req.user.id, itemId, mediaType || null, title || null, posterUrl || null],
-      function (err) {
-        if (err) return res.status(500).json({ error: 'Database error' });
-        // Finishing a show is how it leaves Currently Watching. The three lists
-        // are exclusive, so marking it watched has to take it out of the one it
-        // was in — otherwise it would sit there being told about episodes of a
-        // show the user has already finished.
-        db.run('DELETE FROM currently_watching WHERE user_id = ? AND item_id = ?', [req.user.id, itemId]);
-        res.json({ success: true, added: this.changes > 0 });
-      }
-    );
+    try {
+      let added = false;
+      let movedFrom = [];
+      await withTransaction(db, async () => {
+        const result = await runSql(
+          db,
+          'INSERT OR IGNORE INTO watched_items (user_id, item_id, media_type, title, poster_url) VALUES (?, ?, ?, ?, ?)',
+          [req.user.id, itemId, mediaType || null, title || null, posterUrl || null]
+        );
+        added = result.changes > 0;
+        // Seen it. That supersedes both meaning to see it and being part-way
+        // through it, so the title leaves whichever of those it was in.
+        movedFrom = await claimForList(db, req.user.id, itemId, 'watched');
+      });
+      res.json({ success: true, added, movedFrom });
+    } catch {
+      res.status(500).json({ error: 'Database error' });
+    }
   });
 
   // ── Watched list CLEAR ────────────────────────────────────────────────────
@@ -836,11 +847,14 @@ function createApp(db, { disableRateLimit = false, rateLimitMax = null } = {}) {
    * Pure SQL, no network. Safe to call as often as you like.
    */
   async function adoptCachedResolutions(db, userId) {
+    // Watchlist rows are included. They were excluded when the only thing an
+    // id was good for was the analytics page, which does not report on them —
+    // but an id is also what puts a saved film on the actual watchlist, and a
+    // cache hit costs nothing.
     const unresolved = await getRows(
       db,
       `SELECT DISTINCT film_key, name, year FROM letterboxd_entries
-        WHERE user_id = ? AND item_id IS NULL
-          AND (source IS NULL OR source <> 'watchlist')`,
+        WHERE user_id = ? AND item_id IS NULL`,
       [userId]
     );
     if (!unresolved.length) return 0;
@@ -1038,6 +1052,23 @@ function createApp(db, { disableRateLimit = false, rateLimitMax = null } = {}) {
         -- never reports on, on top of the films it does.
         AND (e.source IS NULL OR e.source <> 'watchlist')`;
 
+  /**
+   * Watchlist rows still waiting on a title search.
+   *
+   * They need far less than a diary row does — an id, and nothing else. The
+   * analytics page never reports on them, so genres, crew and keywords would be
+   * fetched for nothing. What the id is for is putting the film on the actual
+   * watchlist, which is what `syncWatchlistFromExport` does with it.
+   *
+   * The empty string is the marker for a name TMDB has nothing under, so a row
+   * carrying it is finished, not pending.
+   */
+  const PENDING_WATCHLIST_FILTER = `
+       FROM letterboxd_entries e
+      WHERE e.user_id = ?
+        AND e.source = 'watchlist'
+        AND e.item_id IS NULL`;
+
   async function countPendingFilms(userId) {
     const [{ pending = 0 } = {}] = await getRows(
       db,
@@ -1047,6 +1078,122 @@ function createApp(db, { disableRateLimit = false, rateLimitMax = null } = {}) {
       [userId, PAYLOAD_SENTINEL_KEY]
     );
     return pending;
+  }
+
+  async function countPendingWatchlist(userId) {
+    const [{ pending = 0 } = {}] = await getRows(
+      db,
+      `SELECT COUNT(*) AS pending FROM (
+         SELECT e.film_key ${PENDING_WATCHLIST_FILTER} GROUP BY e.film_key
+       )`,
+      [userId]
+    );
+    return pending;
+  }
+
+  /**
+   * Put the resolved half of an imported watchlist onto the actual watchlist.
+   *
+   * `watchlist.csv` used to reach `letterboxd_entries` and stop there. It was
+   * counted in the import's response, so the import looked like it had worked,
+   * but the rows were never searched and never reached `watchlist_items` — the
+   * table the Watchlist tab reads and the table For You excludes against. A
+   * user who imported their whole export got a watchlist stat on the analytics
+   * page and an empty Watchlist tab, and kept being recommended films they had
+   * already saved.
+   *
+   * Idempotent, and safe to call after every batch: it inserts whatever is
+   * resolved and not yet there.
+   *
+   * Two rules, both deliberate:
+   *
+   *  - Films only. Letterboxd has nothing else, so a `tv-` id here is a
+   *    mis-resolution rather than a television programme someone saved.
+   *  - A film already watched, or already part-watched, is skipped rather than
+   *    moved. This is a bulk restatement — nobody pressed anything for these
+   *    titles — and a stale export naming a thousand films you have since seen
+   *    must not delete a thousand rows of history. See `claimForImport`.
+   *
+   * The insert is additive: a re-import adds what is new and leaves titles the
+   * user saved by hand alone. Replacing is what the per-file import in Settings
+   * is for, and it asks first.
+   */
+  async function syncWatchlistFromExport(db, userId) {
+    const { changes: added } = await runSql(
+      db,
+      `INSERT OR IGNORE INTO watchlist_items (user_id, item_id, media_type, title, poster_url)
+       SELECT DISTINCT e.user_id, e.item_id, c.media_type, c.title, c.poster_url
+         FROM letterboxd_entries e
+         JOIN title_lookup_cache c ON c.item_id = e.item_id
+        WHERE e.user_id = ?
+          AND e.source = 'watchlist'
+          AND e.item_id LIKE 'movie-%'
+          AND NOT EXISTS (
+            SELECT 1 FROM watched_items w
+             WHERE w.user_id = e.user_id AND w.item_id = e.item_id)
+          AND NOT EXISTS (
+            SELECT 1 FROM currently_watching cw
+             WHERE cw.user_id = e.user_id AND cw.item_id = e.item_id)`,
+      [userId]
+    );
+
+    // Reported rather than silently dropped: "12 of these are already in your
+    // watched history" is information, and its absence is what made the old
+    // behaviour feel like a bug.
+    const [{ skipped = 0 } = {}] = await getRows(
+      db,
+      `SELECT COUNT(DISTINCT e.item_id) AS skipped
+         FROM letterboxd_entries e
+        WHERE e.user_id = ?
+          AND e.source = 'watchlist'
+          AND e.item_id LIKE 'movie-%'
+          AND EXISTS (
+            SELECT 1 FROM watched_items w
+             WHERE w.user_id = e.user_id AND w.item_id = e.item_id)`,
+      [userId]
+    );
+    return { added, skippedAlreadyWatched: skipped };
+  }
+
+  /**
+   * Search one batch of imported watchlist rows, then sync what resolved.
+   *
+   * Split out from the diary batch below because the two want different work:
+   * a diary row needs genres, crew and keywords before the analytics page can
+   * say anything about it, and a saved film needs an id and nothing else.
+   */
+  async function resolveWatchlistBatch(userId, limit) {
+    const rows = await getRows(
+      db,
+      `SELECT e.film_key, MIN(e.name) AS name, MIN(e.year) AS year
+         ${PENDING_WATCHLIST_FILTER}
+        GROUP BY e.film_key
+        LIMIT ?`,
+      [userId, limit]
+    );
+
+    if (rows.length) {
+      const matches = await resolveImportBatch(db, rows.map(({ name, year }) => ({ name, year })));
+      await withTransaction(db, async () => {
+        for (let i = 0; i < rows.length; i++) {
+          // An outage leaves the row NULL so the next batch tries again. Writing
+          // the miss marker here would retire a film over a dropped connection.
+          if (matches[i] === LOOKUP_UNAVAILABLE) continue;
+          await runSql(
+            db,
+            `UPDATE letterboxd_entries SET item_id = ?
+              WHERE user_id = ? AND film_key = ? AND source = 'watchlist'`,
+            [matches[i]?.itemId || '', userId, rows[i].film_key]
+          );
+        }
+      });
+    }
+
+    // Run even when this batch searched nothing: rows resolved by an earlier
+    // batch, or adopted from another user's lookup, still need putting on the
+    // list.
+    const synced = await syncWatchlistFromExport(db, userId);
+    return { resolved: synced.added, skippedAlreadyWatched: synced.skippedAlreadyWatched };
   }
 
   /**
@@ -1071,8 +1218,19 @@ function createApp(db, { disableRateLimit = false, rateLimitMax = null } = {}) {
           LIMIT ?`,
         [req.user.id, PAYLOAD_SENTINEL_KEY, limit]
       );
+      // The watchlist half of the backlog. Cheaper than a diary row — a search
+      // and nothing more — so it rides along with every batch rather than
+      // needing a queue of its own.
+      const savedProgress = await resolveWatchlistBatch(req.user.id, limit);
+
       if (!pendingRows.length) {
-        return res.json({ resolved: 0, failed: 0, pending: await countPendingFilms(req.user.id) });
+        return res.json({
+          resolved: savedProgress.resolved,
+          failed: 0,
+          pending: (await countPendingFilms(req.user.id)) + (await countPendingWatchlist(req.user.id)),
+          watchlist: savedProgress,
+          unavailable: isTmdbUnavailable(),
+        });
       }
 
       // Rows that already carry an id skip the search and go straight to the
@@ -1148,10 +1306,14 @@ function createApp(db, { disableRateLimit = false, rateLimitMax = null } = {}) {
       // found", which points at the titles; when the breaker is open the truth
       // is that nobody is answering, and that is worth waiting out rather than
       // pressing again.
+      // `pending` is the whole backlog, films and saved titles together,
+      // because the client's loop drives on this one number. Split out under
+      // `watchlist` for anything that wants to say which is which.
       res.json({
-        resolved: done,
+        resolved: done + savedProgress.resolved,
         failed: keys.length - done,
-        pending: await countPendingFilms(req.user.id),
+        pending: (await countPendingFilms(req.user.id)) + (await countPendingWatchlist(req.user.id)),
+        watchlist: savedProgress,
         unavailable: isTmdbUnavailable(),
       });
     } catch (e) {
@@ -1384,12 +1546,23 @@ function createApp(db, { disableRateLimit = false, rateLimitMax = null } = {}) {
       });
 
       if (direction === 'right') {
-        await runSql(
-          db,
-          `INSERT OR IGNORE INTO watchlist_items (user_id, item_id, media_type, title, poster_url)
-           VALUES (?, ?, ?, ?, ?)`,
-          [req.user.id, itemId, mediaType || null, title || null, posterUrl || null]
-        );
+        // Insert and claim in one transaction, as the other two save paths do.
+        // Apart they are two writes with a window between them, and anything
+        // that goes wrong in that window leaves the title in two lists at once
+        // — the exact state the rule exists to prevent.
+        await withTransaction(db, async () => {
+          await runSql(
+            db,
+            `INSERT OR IGNORE INTO watchlist_items (user_id, item_id, media_type, title, poster_url)
+             VALUES (?, ?, ?, ?, ?)`,
+            [req.user.id, itemId, mediaType || null, title || null, posterUrl || null]
+          );
+          // A right swipe is an Add to Watchlist by another name, so it carries
+          // the same claim. Discovery already hides watched and watchlisted
+          // titles, but the queue is built once and swiped through later — a
+          // card can outlive the state it was built from.
+          await claimForList(db, req.user.id, itemId, 'watchlist');
+        });
       }
       res.json({ success: true, saved: direction === 'right' });
     } catch (e) {
@@ -1606,21 +1779,31 @@ function createApp(db, { disableRateLimit = false, rateLimitMax = null } = {}) {
   });
 
   // ── Watchlist POST ────────────────────────────────────────────────────────
-  app.post('/watchlist', authenticateToken, (req, res) => {
+  app.post('/watchlist', authenticateToken, async (req, res) => {
     const { itemId, mediaType, title, posterUrl } = req.body || {};
     if (!itemId || typeof itemId !== 'string') {
       return res.status(400).json({ error: 'itemId required' });
     }
-    db.run(
-      `INSERT OR IGNORE INTO watchlist_items (user_id, item_id, media_type, title, poster_url) VALUES (?, ?, ?, ?, ?)`,
-      [req.user.id, itemId, mediaType || null, title || null, posterUrl || null],
-      function (err) {
-        if (err) return res.status(500).json({ error: 'Database error' });
-        // Deliberately moving a show back to "later" takes it out of the run.
-        db.run('DELETE FROM currently_watching WHERE user_id = ? AND item_id = ?', [req.user.id, itemId]);
-        res.json({ success: true, added: this.changes > 0 });
-      }
-    );
+    try {
+      let added = false;
+      let movedFrom = [];
+      await withTransaction(db, async () => {
+        const result = await runSql(
+          db,
+          `INSERT OR IGNORE INTO watchlist_items (user_id, item_id, media_type, title, poster_url) VALUES (?, ?, ?, ?, ?)`,
+          [req.user.id, itemId, mediaType || null, title || null, posterUrl || null]
+        );
+        added = result.changes > 0;
+        // Saving something deliberately says you mean to watch it, which is a
+        // statement about the future — so it wins over both a part-watched run
+        // and an old watched row. Adding a film you have seen is how you queue
+        // a rewatch, and the alternative is a button that does nothing.
+        movedFrom = await claimForList(db, req.user.id, itemId, 'watchlist');
+      });
+      res.json({ success: true, added, movedFrom });
+    } catch {
+      res.status(500).json({ error: 'Database error' });
+    }
   });
 
   // ── Watchlist CLEAR ───────────────────────────────────────────────────────
@@ -1751,7 +1934,7 @@ function createApp(db, { disableRateLimit = false, rateLimitMax = null } = {}) {
   //   watched   — a history, which only ever grows, so an upload MERGES. Rows
   //               already present are left alone by INSERT OR IGNORE.
   app.post('/import/letterboxd', authenticateToken, async (req, res) => {
-    const { items, importType, replaceExisting } = req.body || {};
+    const { items, importType, replaceExisting, importToken, finalise } = req.body || {};
     if (!Array.isArray(items) || items.length === 0) {
       return res.status(400).json({ error: 'items array required' });
     }
@@ -1761,71 +1944,103 @@ function createApp(db, { disableRateLimit = false, rateLimitMax = null } = {}) {
     if (replaceExisting === true && importType !== 'watchlist') {
       return res.status(400).json({ error: 'replaceExisting is only valid for a watchlist import' });
     }
-
-    let replaced = 0;
-    if (replaceExisting === true) {
-      try {
-        await withTransaction(db, async () => {
-          const result = await runSql(db, 'DELETE FROM watchlist_items WHERE user_id = ?', [req.user.id]);
-          replaced = result.changes;
-          // The availability cache is keyed per user and item; stale rows would
-          // otherwise keep answering for titles no longer on the list.
-          await runSql(db, 'DELETE FROM watchlist_streaming_cache WHERE user_id = ?', [req.user.id]);
-        });
-      } catch {
-        return res.status(500).json({ error: 'Could not clear the existing watchlist' });
-      }
+    if (replaceExisting === true && (typeof importToken !== 'string' || !importToken.trim())) {
+      // Without a token there is no way to tell this import's rows from the
+      // ones it is meant to replace, and the only remaining way to replace is
+      // the old one: delete first and hope the rest arrives.
+      return res.status(400).json({ error: 'replaceExisting needs an importToken' });
     }
+    const token = replaceExisting === true ? importToken.trim() : null;
 
     const batch = items.slice(0, MAX_IMPORT_BATCH);
     const table = importType === 'watched' ? 'watched_items' : 'watchlist_items';
     const timeCol = importType === 'watched' ? 'watched_at' : 'added_at';
 
-    const usable = batch.filter(({ name, year }) => name && year);
-    let notFound = batch.length - usable.length;
+    // A row is usable if it has a name. The year is a hint, not a requirement:
+    // Letterboxd leaves it blank for a film with no release date yet, which is
+    // exactly the kind of thing a watchlist is full of. Dropping those silently
+    // — and then reporting a count that had already been reduced — is how an
+    // import could lose a title without anything anywhere saying so.
+    const usable = batch.filter(({ name }) => typeof name === 'string' && name.trim());
+    let unusable = batch.length - usable.length;
+    // A set, not a counter: the same film can appear twice in one export.
+    const skippedAlreadyWatched = new Set();
+    let notFound = 0;
+    let unavailable = 0;
     let matched = 0;
+    let added = 0;
 
     let results;
     try {
-      results = await resolveImportBatch(db, usable);
+      results = await resolveImportBatch(
+        db,
+        usable.map(({ name, year }) => ({ name, year: Number.isInteger(year) ? year : null }))
+      );
     } catch (err) {
       console.error('[import] batch lookup failed:', err.message);
       return res.status(502).json({ error: 'Could not reach the title database' });
     }
 
-    // One transaction for the whole batch. Standalone INSERTs meant one commit
-    // — and one disk sync — per title.
+    const imported = [];
     try {
       await withTransaction(db, async () => {
-        const imported = [];
+        // Asked once for the batch rather than per row. A watchlist import must
+        // not delete watched history; see claimForImport.
+        const candidateIds = results
+          .filter((r) => r && r !== LOOKUP_UNAVAILABLE && r.itemId)
+          .map((r) => r.itemId);
+        const watched = importType === 'watchlist'
+          ? await alreadyWatched(db, req.user.id, candidateIds)
+          : new Set();
+
         for (const result of results) {
-          if (!result || result === LOOKUP_UNAVAILABLE) { notFound++; continue; }
+          // Told apart on purpose. "TMDB has nothing under this name" is about
+          // the film; "TMDB did not answer" is about the network, and reporting
+          // the second as the first is what made an outage look like a library
+          // full of unknown films.
+          if (result === LOOKUP_UNAVAILABLE) { unavailable++; continue; }
+          if (!result) { notFound++; continue; }
+          // Letterboxd holds films and nothing else, so a television match here
+          // is the search having reached for the nearest thing, not a show.
+          if (result.mediaType !== 'movie') { notFound++; continue; }
+          if (watched.has(result.itemId)) { skippedAlreadyWatched.add(result.itemId); continue; }
+
           const { changes } = await runSql(
             db,
-            `INSERT OR IGNORE INTO ${table} (user_id, item_id, media_type, title, poster_url, ${timeCol}) VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP)`,
+            `INSERT OR IGNORE INTO ${table} (user_id, item_id, media_type, title, poster_url, ${timeCol})
+             VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP)`,
             [req.user.id, result.itemId, result.mediaType, result.title, result.posterUrl]
           );
-          if (changes > 0) matched++;
+          // Counted on resolving, not on inserting. A row that was already
+          // there is still one of the user's titles accounted for, and a
+          // re-import of an unchanged list — the common case, since an upload
+          // replaces — would otherwise report that nothing came through.
+          matched++;
+          if (changes > 0) added++;
           imported.push(result.itemId);
         }
 
-        // Keep the three lists exclusive across an import too. A watched import
-        // ends any run in progress for the shows it names; a watchlist import
-        // loses to Currently Watching, because "I am watching this now" is the
-        // more specific claim than "I might watch this".
         if (imported.length) {
-          const placeholders = imported.map(() => '?').join(',');
-          const sql =
-            importType === 'watched'
-              ? `DELETE FROM currently_watching WHERE user_id = ? AND item_id IN (${placeholders})`
-              : `DELETE FROM watchlist_items
-                  WHERE user_id = ? AND item_id IN (${placeholders})
-                    AND item_id IN (SELECT item_id FROM currently_watching WHERE user_id = ?)`;
-          const params =
-            importType === 'watched'
-              ? [req.user.id, ...imported]
-              : [req.user.id, ...imported, req.user.id];
-          await runSql(db, sql, params);
+          // Stamped so a replacing import can tell its own rows from the ones
+          // it supersedes. Applied to rows that were already there too: a title
+          // on both the old and the new list is not stale.
+          if (token) {
+            for (let i = 0; i < imported.length; i += 500) {
+              const chunk = imported.slice(i, i + 500);
+              await runSql(
+                db,
+                `UPDATE watchlist_items SET import_token = ?
+                  WHERE user_id = ? AND item_id IN (${chunk.map(() => '?').join(',')})`,
+                [token, req.user.id, ...chunk]
+              );
+            }
+          }
+          // The one rule, applied in bulk. Nothing here needs to spare the
+          // watched history explicitly: a watchlist import never reaches this
+          // point with a title it has seen, because `alreadyWatched` skipped it
+          // above. A watched import has no such exception — a history
+          // supersedes both intent and progress.
+          await claimForImport(db, req.user.id, imported, importType === 'watched' ? 'watched' : 'watchlist');
         }
       });
     } catch (err) {
@@ -1833,11 +2048,42 @@ function createApp(db, { disableRateLimit = false, rateLimitMax = null } = {}) {
       return res.status(500).json({ error: 'Could not save the imported titles' });
     }
 
+    // Only now, and only when asked, does the previous watchlist go. An import
+    // that died half way leaves a superset rather than a fraction.
+    let replaced = 0;
+    if (finalise === true && token) {
+      if (unavailable > 0) {
+        // Finalising after an outage would delete the titles this import failed
+        // to look up. The old list stays until an import gets all the way through.
+        return res.status(503).json({
+          error: 'The title database stopped answering, so your existing watchlist was left alone. Try the import again.',
+          matched, notFound, unavailable, unusable, processed: batch.length, replaced: 0, finalised: false,
+        });
+      }
+      try {
+        replaced = await finaliseWatchlistImport(db, req.user.id, token);
+      } catch (err) {
+        console.error('[import] finalise failed:', err.message);
+        return res.status(500).json({ error: 'Could not replace the existing watchlist' });
+      }
+    }
+
     // A finished import is the biggest single injection of saved titles, so
     // start rating them straight away rather than waiting for the next visit.
     warmSavedRatings(db, req.user.id);
 
-    res.json({ matched, notFound, processed: batch.length, replaced });
+    res.json({
+      matched,
+      // Rows this batch actually created, as against titles it accounted for.
+      added,
+      notFound,
+      unavailable,
+      unusable,
+      skippedAlreadyWatched: skippedAlreadyWatched.size,
+      processed: batch.length,
+      replaced,
+      finalised: finalise === true && Boolean(token),
+    });
   });
 
   // ── Error handler ─────────────────────────────────────────────────────────
