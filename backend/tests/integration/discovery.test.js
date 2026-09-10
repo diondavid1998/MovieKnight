@@ -33,14 +33,20 @@ let db, app, token;
 const auth = (req) => req.set('Authorization', `Bearer ${token}`);
 
 /** A catalog row on the reader's service. */
-async function addCandidate({ id, title, genres = ['Drama'], language = 'en', year = 2015, imdb = '7.5' }) {
+async function addCandidate({
+  id, title, genres = ['Drama'], language = 'en', year = 2015, imdb = '7.5',
+  // A title no subscription covers: `availableOn` is empty and the storefronts
+  // are the only thing that can tell the reader where to watch it.
+  keys = ['netflix'], on = ['Netflix'], stores = [],
+}) {
   await new Promise((resolve, reject) => db.run(
     `INSERT INTO catalog_cache_entries
        (scope_key, media_type, tmdb_id, title, year, release_date, popularity, updated_at,
         first_seen_at, genres_json, original_language, rating_imdb, rating_imdb_num,
-        available_on_keys_json, available_on_json)
-     VALUES (?, 'movie', ?, ?, ?, ?, 50, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, ?, ?, ?, ?, '["netflix"]', '["Netflix"]')`,
-    [SCOPE, id, title, String(year), `${year}-01-01`, JSON.stringify(genres), language, imdb, parseFloat(imdb)],
+        available_on_keys_json, available_on_json, purchase_on_json)
+     VALUES (?, 'movie', ?, ?, ?, ?, 50, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, ?, ?, ?, ?, ?, ?, ?)`,
+    [SCOPE, id, title, String(year), `${year}-01-01`, JSON.stringify(genres), language, imdb,
+     parseFloat(imdb), JSON.stringify(keys), JSON.stringify(on), JSON.stringify(stores)],
     (e) => (e ? reject(e) : resolve())
   ));
 }
@@ -367,5 +373,35 @@ describe('the second tier', () => {
     // calls are not made.
     expect(fetchTitleWithCredits).not.toHaveBeenCalled();
     expect(res.body.cards.every((c) => c.tier === 1)).toBe(true);
+  });
+});
+
+
+describe('a suggestion nobody streams', () => {
+  it('carries the storefronts, so the card can say where to watch it', async () => {
+    // A reader who picked PVOD. Their scope key names both services, and the
+    // candidate query filters on the same keys — so a rentable title is only
+    // ever suggested to someone who asked for rentable titles.
+    await auth(request(app).put('/platforms')).send({ platforms: ['netflix', 'pvod'], languages: [] });
+    const pvodScope = 'region:US|platforms:netflix,pvod|languages:';
+
+    await new Promise((resolve, reject) => db.run(
+      `INSERT INTO catalog_cache_entries
+         (scope_key, media_type, tmdb_id, title, year, release_date, popularity, updated_at,
+          first_seen_at, genres_json, original_language, rating_imdb, rating_imdb_num,
+          available_on_keys_json, available_on_json, purchase_on_json)
+       VALUES (?, 'movie', 9001, 'Rent Only Pick', '2026', '2026-01-01', 90, CURRENT_TIMESTAMP,
+               CURRENT_TIMESTAMP, '["Drama"]', 'en', '7.8', 7.8, '["pvod"]', '[]', '["Apple TV"]')`,
+      [pvodScope],
+      (e) => (e ? reject(e) : resolve())
+    ));
+
+    const res = await auth(request(app).get('/discovery'));
+    const card = res.body.cards.find((c) => c.title === 'Rent Only Pick');
+    expect(card).toBeDefined();
+    // Nothing a subscription covers, so without the storefronts this card would
+    // render no availability line at all.
+    expect(card.availableOn).toEqual([]);
+    expect(card.purchaseOn).toEqual(['Apple TV']);
   });
 });

@@ -604,6 +604,10 @@ let allPlatforms: [StreamingPlatform] = [
     .init(id: "amc",         key: "amc",         name: "AMC+",                logoAsset: nil,             accentColor: Color(red: 0.000, green: 0.600, blue: 0.800)),
     .init(id: "pluto",       key: "pluto",       name: "Pluto TV",            logoAsset: nil,             accentColor: Color(red: 0.996, green: 0.882, blue: 0.000)),
     .init(id: "mubi",        key: "mubi",        name: "MUBI",                logoAsset: nil,             accentColor: Color(red: 0.055, green: 0.063, blue: 0.129)),
+    // Not a subscription — a tier. Picking it says "also show me what I could
+    // rent or buy", and the card then names the storefronts. Last in the list
+    // because it is the one entry that is not a service you already pay for.
+    .init(id: "pvod",        key: "pvod",        name: "PVOD",                logoAsset: nil,             accentColor: Color(red: 1.000, green: 0.761, blue: 0.302)),
 ]
 
 /// The keys `allPlatforms` covers, for pruning a stored selection.

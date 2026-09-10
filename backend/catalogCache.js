@@ -3,6 +3,9 @@ const {
   fetchOmdbRatings,
   fetchTitleDetails,
   includedProviders,
+  selectionIncludesPurchase,
+  PURCHASE_MONETIZATION,
+  PVOD_KEY,
   isOmdbRateLimited,
   PLATFORM_CONFIG,
 } = require('./movieService');
@@ -38,7 +41,13 @@ const REVALIDATE_MARKER = '1970-01-01T00:00:00.000Z';
 const DEFAULT_REGION = 'US';
 // Ratings rarely change — keep them indefinitely once fetched.
 // They are only re-fetched when a manual full refresh explicitly requests it.
-// Increment this whenever PLATFORM_CONFIG provider IDs change so stale caches are invalidated
+// Increment this whenever the provider IDs behind an *existing* PLATFORM_CONFIG
+// key change, so caches built against the old ids are invalidated.
+//
+// Adding a whole new key does not need it: buildScopeKey includes the sorted
+// platform list, so a selection naming the new service is a new scope and its
+// cache is cold already. Bumping regardless would re-sync every user in the
+// database to no effect — which is why PVOD, added later, left this at 4.
 // Bumped when availability semantics change so stale snapshots are dropped:
 // v3 added free and ad-supported tiers alongside flatrate.
 const PROVIDER_CONFIG_VERSION = 4;
@@ -186,6 +195,10 @@ async function ensureCatalogTables(db) {
       rating_meta_num REAL,
       available_on_json TEXT DEFAULT '[]',
       available_on_keys_json TEXT DEFAULT '[]',
+      -- Where a title can be rented or bought, kept apart from what a
+      -- subscription covers. "On Apple TV" and "£13.99 on Apple TV" are not the
+      -- same sentence, and one list cannot say both.
+      purchase_on_json TEXT DEFAULT '[]',
       updated_at TEXT NOT NULL,
       first_seen_at TEXT,
       PRIMARY KEY (scope_key, media_type, tmdb_id)
@@ -195,6 +208,11 @@ async function ensureCatalogTables(db) {
   // Migrate: add first_seen_at to existing tables that predate this column
   try {
     await run(db, `ALTER TABLE catalog_cache_entries ADD COLUMN first_seen_at TEXT`);
+  } catch { /* column already exists */ }
+
+  // Migrate: purchase_on_json arrived with the PVOD tier.
+  try {
+    await run(db, `ALTER TABLE catalog_cache_entries ADD COLUMN purchase_on_json TEXT DEFAULT '[]'`);
   } catch { /* column already exists */ }
 
   await run(
@@ -351,10 +369,16 @@ async function ensureCatalogTables(db) {
       imdb_id              TEXT,
       available_on_json    TEXT DEFAULT '[]',
       available_on_keys_json TEXT DEFAULT '[]',
+      purchase_on_json     TEXT DEFAULT '[]',
       checked_at           TEXT NOT NULL,
       PRIMARY KEY (user_id, item_id)
     )`
   );
+
+  // Migrate: the same column, for a watchlist cache that predates the PVOD tier.
+  try {
+    await run(db, `ALTER TABLE watchlist_streaming_cache ADD COLUMN purchase_on_json TEXT DEFAULT '[]'`);
+  } catch { /* column already exists */ }
 
   // The durable per-title cache and the Currently Watching list. Created here
   // so every bootstrap path — production, tests — gets them from one place.
@@ -478,8 +502,8 @@ async function syncScope(
               scope_key, media_type, tmdb_id, title, overview, release_date, year, poster_url, backdrop_path,
               tmdb_rating, tmdb_vote_count, popularity, original_language, genres_json, imdb_id, rating_imdb,
               rating_imdb_num, rating_rt, rating_rt_num, rating_meta, rating_meta_num, available_on_json,
-              available_on_keys_json, updated_at, first_seen_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+              available_on_keys_json, purchase_on_json, updated_at, first_seen_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(scope_key, media_type, tmdb_id) DO UPDATE SET
               title                = excluded.title,
               overview             = excluded.overview,
@@ -501,6 +525,7 @@ async function syncScope(
               rating_meta_num      = COALESCE(excluded.rating_meta_num, rating_meta_num),
               available_on_json    = excluded.available_on_json,
               available_on_keys_json = excluded.available_on_keys_json,
+              purchase_on_json     = excluded.purchase_on_json,
               updated_at           = excluded.updated_at,
               first_seen_at        = COALESCE(first_seen_at, excluded.first_seen_at)`,
             [
@@ -527,6 +552,7 @@ async function syncScope(
               item.sortableRatings?.metacritic || null,
               JSON.stringify(item.availableOn || []),
               JSON.stringify(item.availableOnKeys || []),
+              JSON.stringify(item.purchaseOn || []),
               syncStartTime,
               syncStartTime, // first_seen_at — COALESCE keeps original on re-sync
             ]
@@ -1259,6 +1285,7 @@ async function readCachedCatalog(
     },
     availableOn: JSON.parse(row.available_on_json || '[]'),
     availableOnKeys: JSON.parse(row.available_on_keys_json || '[]'),
+    purchaseOn: JSON.parse(row.purchase_on_json || '[]'),
   }));
 
   const stateRow = await get(db, 'SELECT * FROM catalog_cache_state WHERE scope_key = ?', [scopeKey]);
@@ -1299,7 +1326,9 @@ function buildProviderLookupMap(platforms) {
     if (!config) continue;
     const ids = config.ids || (config.id ? [config.id] : []);
     for (const id of ids) {
-      map.set(id, { key, name: config.name });
+      // `purchase` rides along: it is how extractAvailability knows the user
+      // asked for rentals at all.
+      map.set(id, { key, name: config.name, purchase: Boolean(config.purchase) });
     }
   }
   return map;
@@ -1311,11 +1340,26 @@ function extractAvailability(watchProviders, providerMap, region) {
   // movieService. Reading only `flatrate` here is why a watchlist title on Tubi
   // or Pluto came back with an empty availableOn even after the discover query
   // had found it.
-  const offers = includedProviders(watchProviders, region);
+  //
+  // Rentals and purchases ride along only when the user picked PVOD, and are
+  // kept in a list of their own: this is the watchlist view, where "where can I
+  // watch this" and "what would it cost me" are different questions.
+  const includePurchase = selectionIncludesPurchase(providerMap);
+  const offers = includedProviders(watchProviders, region, { includePurchase });
   const seen = new Set();
   const names = [];
   const keys = [];
+  const purchaseNames = [];
   for (const p of offers) {
+    if (PURCHASE_MONETIZATION.includes(p.tier)) {
+      // Named as TMDB gives it, not from the id list: whoever sells it, you can
+      // buy it, so a storefront nobody thought to list still reads correctly.
+      if (p.provider_name && !purchaseNames.includes(p.provider_name)) {
+        purchaseNames.push(p.provider_name);
+        if (!keys.includes(PVOD_KEY)) keys.push(PVOD_KEY);
+      }
+      continue;
+    }
     const entry = providerMap.get(p.provider_id);
     if (entry && !seen.has(entry.key)) {
       seen.add(entry.key);
@@ -1323,7 +1367,7 @@ function extractAvailability(watchProviders, providerMap, region) {
       keys.push(entry.key);
     }
   }
-  return { names, keys };
+  return { names, keys, purchaseNames };
 }
 
 /**
@@ -1405,14 +1449,15 @@ async function getWatchlistItemsWithAvailability(
             details.external_ids?.imdb_id || null,
             JSON.stringify(available.names),
             JSON.stringify(available.keys),
+            JSON.stringify(available.purchaseNames || []),
             nowIso,
           ];
           await run(db,
             `INSERT OR REPLACE INTO watchlist_streaming_cache
                (user_id, item_id, title, poster_url, overview, release_date, year,
                 tmdb_rating, tmdb_vote_count, popularity, original_language, genres_json, imdb_id,
-                available_on_json, available_on_keys_json, checked_at)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+                available_on_json, available_on_keys_json, purchase_on_json, checked_at)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
             vals
           );
           cached = {
@@ -1421,6 +1466,7 @@ async function getWatchlistItemsWithAvailability(
             tmdb_vote_count: vals[8], popularity: vals[9], original_language: vals[10],
             genres_json: vals[11], imdb_id: vals[12],
             available_on_json: vals[13], available_on_keys_json: vals[14],
+            purchase_on_json: vals[15],
           };
         }
       } catch (e) {
@@ -1456,6 +1502,7 @@ async function getWatchlistItemsWithAvailability(
       _imdbIdForRatings: cached.imdb_id || null,
       availableOn: JSON.parse(cached.available_on_json || '[]'),
       availableOnKeys: JSON.parse(cached.available_on_keys_json || '[]'),
+      purchaseOn: JSON.parse(cached.purchase_on_json || '[]'),
     });
   }
 
@@ -1509,6 +1556,9 @@ function getStreamableWatchlistItems(db, userId, watchlistRows, platforms, regio
 module.exports = {
   AUTO_SYNC_MS,
   ensureCatalogTables,
+  // Exported for unit testing
+  extractAvailability,
+  buildProviderLookupMap,
   ensureScopeSynced,
   readCachedCatalog,
   buildSortExpression,

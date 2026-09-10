@@ -51,6 +51,15 @@ struct DetailSheet: View {
                                 }
                             }
 
+                            // Its own block, under its own heading. Folding these
+                            // into the one above would put "£13.99" and "included
+                            // in what you already pay" under the same sentence.
+                            if let stores = movie.purchaseOn, !stores.isEmpty {
+                                sectionBlock("Rent or buy") {
+                                    serviceGrid(stores)
+                                }
+                            }
+
                             let ratings = buildRatings()
                             if !ratings.isEmpty {
                                 sectionBlock("Scores") {

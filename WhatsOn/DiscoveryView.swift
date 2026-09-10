@@ -524,6 +524,11 @@ private struct DiscoveryCardView: View {
             if !card.availableOn.isEmpty {
                 Text("On \(card.availableOn.prefix(3).joined(separator: ", "))")
                     .font(.caption2).foregroundColor(.white.opacity(0.65))
+            } else if let stores = card.purchaseOn, !stores.isEmpty {
+                // Only when nothing a subscription covers is offering it. A card
+                // that says both would bury the free way to watch under a paid one.
+                Text("Rent from \(stores.prefix(2).joined(separator: ", "))")
+                    .font(.caption2).foregroundColor(.white.opacity(0.65))
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)

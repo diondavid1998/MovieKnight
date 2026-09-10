@@ -134,7 +134,8 @@ struct MovieCardView: View {
     @ViewBuilder
     var serviceBar: some View {
         let providers = movie.availableOn ?? []
-        if !providers.isEmpty {
+        let stores = movie.purchaseOn ?? []
+        if !providers.isEmpty || !stores.isEmpty {
             ScrollView(.horizontal) {
                 HStack(spacing: 6) {
                     ForEach(providers, id: \.self) { name in
@@ -150,6 +151,25 @@ struct MovieCardView: View {
                         .padding(.horizontal, 8)
                         .padding(.vertical, 5)
                         .background(Color.mkSubtleFill, in: Capsule())
+                        .overlay(Capsule().stroke(Color.mkHairline, lineWidth: 1))
+                        .fixedSize(horizontal: true, vertical: false)
+                    }
+
+                    // Rentals sit after everything a subscription covers, and
+                    // carry the word: a chip reading "Apple TV" beside one
+                    // reading "Netflix" would claim this costs nothing extra.
+                    ForEach(stores, id: \.self) { name in
+                        HStack(spacing: 5) {
+                            ProviderMark(name: name, size: 15)
+                                .accessibilityHidden(true)
+                            Text("Rent · \(name)")
+                                .font(.caption2.weight(.semibold))
+                                .foregroundColor(.mkMuted)
+                                .lineLimit(1)
+                        }
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 5)
+                        .background(Color.mkSubtleFill.opacity(0.6), in: Capsule())
                         .overlay(Capsule().stroke(Color.mkHairline, lineWidth: 1))
                         .fixedSize(horizontal: true, vertical: false)
                     }
