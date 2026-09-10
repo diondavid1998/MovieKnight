@@ -13,6 +13,7 @@ const sqlite3 = require('sqlite3').verbose();
  */
 async function createTestDb() {
   const { ensureCatalogTables } = require('../catalogCache');
+  const { ensureListTables } = require('../lists');
 
   const db = new sqlite3.Database(':memory:');
 
@@ -74,6 +75,9 @@ async function createTestDb() {
 
   // Create catalog cache tables
   await ensureCatalogTables(db);
+  // The three-list invariant owns a column on watchlist_items and its own
+  // repair ledger. Tests exercise the same schema the server boots with.
+  await ensureListTables(db);
 
   return db;
 }

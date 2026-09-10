@@ -337,6 +337,45 @@ final class WhatsOnTests: XCTestCase {
         XCTAssertTrue(response.filters.available.options(for: "country").isEmpty)
     }
 
+    /// The lookup button drives on `totalPending`, not on `pending`. Someone who
+    /// imported only a watchlist has no history to resolve — and until the
+    /// button appears and runs, none of those films are on the real watchlist
+    /// either, so the page would offer nothing to press.
+    func testTotalPendingCountsSavedFilmsAlongsideHistory() throws {
+        let both = try decode(AnalyticsCoverage.self, #"""
+        {"films":10,"resolved":4,"pending":6,"unmatched":0,"pendingWatchlist":3}
+        """#)
+        XCTAssertEqual(both.totalPending, 9)
+
+        let watchlistOnly = try decode(AnalyticsCoverage.self, #"""
+        {"films":0,"resolved":0,"pending":0,"unmatched":0,"pendingWatchlist":12}
+        """#)
+        XCTAssertEqual(watchlistOnly.totalPending, 12)
+    }
+
+    /// A server that predates the field sends no `pendingWatchlist` at all.
+    func testCoverageFromABeforeSavedFilmsWereCountedStillDecodes() throws {
+        let old = try decode(AnalyticsCoverage.self, #"""
+        {"films":10,"resolved":4,"pending":6,"unmatched":0}
+        """#)
+        XCTAssertNil(old.pendingWatchlist)
+        XCTAssertEqual(old.totalPending, 6)
+    }
+
+    /// Letterboxd leaves Year blank for a film with no release date yet. The
+    /// preview keeps those rows now, so the client has to decode them — and a
+    /// non-optional `year` would drop the title one layer above the fix.
+    func testAPreviewRowWithNoYearStillDecodes() throws {
+        let result = try decode(LetterboxdPreviewResult.self, #"""
+        {"importType":"watchlist","count":2,"skipped":0,"undated":1,
+         "items":[{"name":"Stalker","year":1979},{"name":"Sinners","year":null}]}
+        """#)
+        XCTAssertEqual(result.items.count, 2)
+        XCTAssertEqual(result.items[0].year, 1979)
+        XCTAssertNil(result.items[1].year)
+        XCTAssertEqual(result.undated, 1)
+    }
+
     /// The ordering arrived after the app shipped, so a server that predates it
     /// must still produce a page — one with fewer controls, not an error screen.
     func testABreakdownFromABeforeOrderingExistedStillDecodes() throws {

@@ -249,11 +249,15 @@ describe('resolving genres and people', () => {
     );
 
     const res = await auth(request(app).post('/analytics/resolve')).send({ limit: 100 });
-    expect(res.body.resolved).toBe(5);
+    // Six, not five: the five diary films, plus Stalker off watchlist.csv,
+    // which the same batch searches and puts on the real watchlist.
+    expect(res.body.resolved).toBe(6);
+    expect(res.body.watchlist).toMatchObject({ resolved: 1 });
     expect(res.body.pending).toBe(0);
 
     const { body } = await auth(request(app).get('/analytics'));
     expect(body.coverage.resolved).toBe(5);
+    expect(body.coverage.pendingWatchlist).toBe(0);
     expect(body.summary.runtimeMinutes).toBe(720);
     // The overview points at the other lenses rather than ranking any of them.
     const dirs = body.highlights.find((h) => h.id === 'directors');

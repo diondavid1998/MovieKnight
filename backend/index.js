@@ -2,6 +2,7 @@
 require('dotenv').config();
 const sqlite3 = require('sqlite3').verbose();
 const { ensureCatalogTables } = require('./catalogCache');
+const { ensureListTables, reconcileLists } = require('./lists');
 const { createApp } = require('./app');
 
 const PORT = process.env.PORT || 4000;
@@ -111,6 +112,23 @@ db.run(`CREATE TABLE IF NOT EXISTS reset_tokens (
 ensureCatalogTables(db).catch((error) => {
   console.error('Failed to initialize catalog cache tables:', error);
 });
+
+// The three lists are exclusive, and until that rule was centralised it was
+// enforced in some write paths and not others — so existing databases hold
+// titles sitting in two lists at once. Repaired once, then never again.
+ensureListTables(db)
+  .then(() => reconcileLists(db))
+  .then((repaired) => {
+    if (repaired) {
+      console.log(
+        `[lists] repaired overlapping rows: ${repaired.watchlist} from the watchlist, ` +
+        `${repaired.watching} from currently watching`
+      );
+    }
+  })
+  .catch((error) => {
+    console.error('Failed to initialize list tables:', error);
+  });
 
 // No scheduled refresh runs here on purpose. TMDB is called when data has never
 // been fetched, or when the Refresh Catalog button asks for it — never on a

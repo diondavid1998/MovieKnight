@@ -130,29 +130,105 @@ describe('Letterboxd import semantics', () => {
 
   afterEach(() => closeDb(db));
 
-  it('replaces the watchlist when the upload says so', async () => {
+  // A replacing upload no longer deletes anything until it has finished. Every
+  // batch carries the same token; the last one asks for the swap.
+  const importing = (body) => request(app)
+    .post('/import/letterboxd')
+    .set('Authorization', `Bearer ${token}`)
+    .send({ importType: 'watchlist', replaceExisting: true, importToken: 'tok-1', ...body });
+
+  it('replaces the watchlist once the upload finishes', async () => {
     await run(db, `INSERT INTO watchlist_items (user_id,item_id,title) VALUES (1,'movie-old','Stale Pick')`);
 
-    const res = await request(app)
-      .post('/import/letterboxd')
-      .set('Authorization', `Bearer ${token}`)
-      .send({ importType: 'watchlist', replaceExisting: true, items: [{ name: 'Fresh', year: 2024 }] });
+    const res = await importing({ items: [{ name: 'Fresh', year: 2024 }], finalise: true });
 
     expect(res.status).toBe(200);
     expect(res.body.replaced).toBe(1);
+    expect(res.body.finalised).toBe(true);
     const rows = await all(db, 'SELECT item_id FROM watchlist_items WHERE user_id = 1');
     expect(rows.map((r) => r.item_id)).toEqual(['movie-500']);
   });
 
-  it('appends on later batches of the same watchlist upload', async () => {
-    await request(app).post('/import/letterboxd').set('Authorization', `Bearer ${token}`)
-      .send({ importType: 'watchlist', replaceExisting: true, items: [{ name: 'First', year: 2024 }] });
-    // The client sets replaceExisting on batch 0 only.
-    await request(app).post('/import/letterboxd').set('Authorization', `Bearer ${token}`)
-      .send({ importType: 'watchlist', items: [{ name: 'Second!', year: 2024 }] });
+  it('appends across the batches of one upload, and swaps at the end', async () => {
+    await run(db, `INSERT INTO watchlist_items (user_id,item_id,title) VALUES (1,'movie-old','Stale Pick')`);
 
+    await importing({ items: [{ name: 'First', year: 2024 }] });
+    // Mid-upload the old list is still there — that is the point.
+    expect(await all(db, 'SELECT item_id FROM watchlist_items WHERE user_id = 1')).toHaveLength(2);
+
+    await importing({ items: [{ name: 'Second!', year: 2024 }], finalise: true });
+
+    const rows = await all(db, 'SELECT item_id FROM watchlist_items WHERE user_id = 1 ORDER BY item_id');
+    expect(rows.map((r) => r.item_id)).toEqual(['movie-500', 'movie-700']);
+  });
+
+  it('leaves the old watchlist alone when the upload never finishes', async () => {
+    // The regression. The wipe used to happen on the first batch, so a client
+    // that died at batch two left the user with a fraction of their watchlist
+    // and no way to tell.
+    await run(db, `INSERT INTO watchlist_items (user_id,item_id,title) VALUES (1,'movie-old','Stale Pick')`);
+
+    await importing({ items: [{ name: 'First', year: 2024 }] });
+    // …and the client stops here. Nothing is finalised.
+
+    const rows = await all(db, 'SELECT item_id FROM watchlist_items WHERE user_id = 1 ORDER BY item_id');
+    expect(rows.map((r) => r.item_id)).toEqual(['movie-500', 'movie-old']);
+  });
+
+  it('refuses to finalise after the title database stopped answering', async () => {
+    await run(db, `INSERT INTO watchlist_items (user_id,item_id,title) VALUES (1,'movie-old','Stale Pick')`);
+    searchTitleOnTmdb.mockRejectedValue(new Error('TMDB unreachable'));
+
+    const res = await importing({ items: [{ name: 'Fresh', year: 2024 }], finalise: true });
+
+    expect(res.status).toBe(503);
+    expect(res.body.unavailable).toBe(1);
+    // Reported as an outage, not as a film nobody has heard of.
+    expect(res.body.notFound).toBe(0);
+    expect(res.body.finalised).toBe(false);
     const rows = await all(db, 'SELECT item_id FROM watchlist_items WHERE user_id = 1');
-    expect(rows).toHaveLength(2);
+    expect(rows.map((r) => r.item_id)).toEqual(['movie-old']);
+  });
+
+  it('needs a token before it will replace anything', async () => {
+    const res = await request(app)
+      .post('/import/letterboxd')
+      .set('Authorization', `Bearer ${token}`)
+      .send({ importType: 'watchlist', replaceExisting: true, items: [{ name: 'Fresh', year: 2024 }] });
+    expect(res.status).toBe(400);
+    expect(res.body.error).toMatch(/importToken/);
+  });
+
+  it('refuses a television match on a Letterboxd import', async () => {
+    // Letterboxd holds films and nothing else. When the film search comes up
+    // empty the resolver falls back to /search/tv, so a hit there is the search
+    // reaching for the nearest thing — not a programme the user saved.
+    searchTitleOnTmdb.mockResolvedValue({
+      itemId: 'tv-900', mediaType: 'tv', title: 'Fresh', posterUrl: null,
+    });
+
+    const res = await request(app)
+      .post('/import/letterboxd')
+      .set('Authorization', `Bearer ${token}`)
+      .send({ importType: 'watchlist', items: [{ name: 'Fresh', year: 2024 }] });
+
+    expect(res.body.matched).toBe(0);
+    expect(res.body.notFound).toBe(1);
+    expect(await all(db, 'SELECT item_id FROM watchlist_items WHERE user_id = 1')).toHaveLength(0);
+  });
+
+  it('keeps a row whose year Letterboxd has not filled in yet', async () => {
+    // An unreleased film has no year. It used to be dropped before the search,
+    // and the count the user saw had already been reduced.
+    const res = await request(app)
+      .post('/import/letterboxd')
+      .set('Authorization', `Bearer ${token}`)
+      .send({ importType: 'watchlist', items: [{ name: 'Unreleased' }] });
+
+    expect(res.status).toBe(200);
+    expect(res.body.unusable).toBe(0);
+    expect(res.body.matched).toBe(1);
+    expect(searchTitleOnTmdb).toHaveBeenCalledWith('Unreleased', null);
   });
 
   it('merges a watched upload into the existing history', async () => {

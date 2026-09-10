@@ -256,11 +256,27 @@ async function ensureAnalyticsTables(db) {
 async function readWatchlist(db, userId) {
   const rows = await all(
     db,
-    `SELECT name, year, film_key FROM letterboxd_entries
+    `SELECT name, year, film_key, item_id FROM letterboxd_entries
       WHERE user_id = ? AND source = 'watchlist'`,
     [userId]
   );
-  return rows.map((row) => ({ name: row.name, year: row.year, filmKey: row.film_key }));
+  return rows.map((row) => ({
+    name: row.name,
+    year: row.year,
+    filmKey: row.film_key,
+    // NULL means the title search has not run yet, so this film is not on the
+    // real watchlist either — the id is what puts it there. The empty string is
+    // a finished search that found nothing.
+    itemId: row.item_id,
+  }));
+}
+
+/** Saved films still waiting on a title search, counted once per film. */
+function countUnresolvedWatchlist(watchlistRows) {
+  return new Set(
+    watchlistRows.filter((row) => row.itemId === null || row.itemId === undefined)
+      .map((row) => row.filmKey)
+  ).size;
 }
 
 /**
@@ -1257,6 +1273,9 @@ async function computeAnalytics(db, userId, options = {}) {
 
   const allRows = await readDiary(db, userId);
   const rows = applyFilters(allRows, applied);
+  // Read on every lens, not just the overview that renders the card: the
+  // resolve button lives on all of them and has to know about this work.
+  const watchlistRows = await readWatchlist(db, userId);
 
   const films = new Set(rows.map((r) => r.filmKey));
   const resolvedFilms = new Set(rows.filter((r) => r.resolved).map((r) => r.filmKey));
@@ -1324,6 +1343,11 @@ async function computeAnalytics(db, userId, options = {}) {
       resolved: resolvedFilms.size,
       pending: films.size - resolvedFilms.size - unmatchedFilms.size,
       unmatched: unmatchedFilms.size,
+      // Saved films waiting on a search. Reported separately because they are
+      // not history and no section here counts them — but the same button
+      // resolves both, and a user who imported only a watchlist would otherwise
+      // see nothing to press.
+      pendingWatchlist: countUnresolvedWatchlist(watchlistRows),
       // The sections below that need TMDB; everything else works regardless.
       needsResolution: ['genres', 'directors', 'cast', 'affinity', 'runtime'],
     },
@@ -1353,7 +1377,7 @@ async function computeAnalytics(db, userId, options = {}) {
   payload.mosaic = buildMosaic(rows);
   if (dimension === 'overview') {
     payload.profile = buildProfile(rows);
-    payload.watchlist = buildWatchlist(await readWatchlist(db, userId), allRows);
+    payload.watchlist = buildWatchlist(watchlistRows, allRows);
   }
   if (dimension === 'overview' || dimension === 'genres') {
     payload.quadrant = buildQuadrant(rows);

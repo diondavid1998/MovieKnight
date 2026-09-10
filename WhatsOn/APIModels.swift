@@ -331,6 +331,16 @@ struct AnalyticsCoverage: Decodable {
     /// Films that were looked up and could not be matched. Optional so a
     /// payload from an older server still decodes.
     let unmatched: Int?
+    /// Saved films from an imported watchlist still waiting on a title search.
+    /// They are not history, so no section on this page counts them — but the
+    /// same button resolves both, and the id is what puts a saved film on the
+    /// real watchlist. Optional so an older server still decodes.
+    let pendingWatchlist: Int?
+
+    /// Everything the lookup button still has to do. The button drives on this
+    /// rather than on `pending`: someone who imported only a watchlist has no
+    /// history to resolve and would otherwise be shown nothing to press.
+    var totalPending: Int { pending + (pendingWatchlist ?? 0) }
 }
 
 struct AnalyticsSummary: Decodable {
@@ -726,18 +736,38 @@ struct AnyCodable: Decodable {
 
 struct LetterboxdPreviewItem: Decodable {
     let name: String
-    let year: Int
+    /// Optional because Letterboxd leaves Year blank for a film with no release
+    /// date yet — much of what sits at the top of a watchlist. These rows used
+    /// to be dropped server-side before the count was taken, so the import lost
+    /// titles silently; decoding them as non-optional would put the drop back,
+    /// one layer up.
+    let year: Int?
 }
 
 struct LetterboxdPreviewResult: Decodable {
     let importType: String?
     let count: Int?
+    /// Rows with no title at all, which really are unusable.
+    let skipped: Int?
+    /// Rows kept despite having no year.
+    let undated: Int?
     let items: [LetterboxdPreviewItem]
 }
 
 struct LetterboxdImportResponse: Decodable {
+    /// Titles this batch accounted for, whether or not the row was new.
     let matched: Int?
+    /// Rows this batch actually created.
+    let added: Int?
+    /// The title database had nothing under that name.
     let notFound: Int?
+    /// The title database did not answer. A different thing entirely, and the
+    /// reason a replacing import refuses to finish.
+    let unavailable: Int?
+    let unusable: Int?
+    let skippedAlreadyWatched: Int?
+    let replaced: Int?
+    let finalised: Bool?
     let processed: Int?
 }
 

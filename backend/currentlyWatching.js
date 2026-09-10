@@ -17,6 +17,7 @@
 const { describeSeries, todayInAppZone } = require('./seriesSchedule');
 const { readSeriesStatuses, storeDetails, readCachedDetails } = require('./titleCache');
 const { fetchTitleWithCredits } = require('./movieService');
+const { claimForList } = require('./lists');
 
 // Local rather than imported from catalogCache: that module would then have to
 // import this one back to create its tables, and a require cycle for eight
@@ -133,12 +134,14 @@ async function listCurrentlyWatching(db, userId, { onlyNew = false } = {}) {
 }
 
 /**
- * Add a show, and take it out of the watchlist.
+ * Add a show, and take it out of the other two lists.
  *
  * The three lists are exclusive: a show you are watching is not a show you are
- * planning to watch. Watched is left alone here — you leave for Watched by
- * finishing, which the client does by marking watched, and that removes the row
- * through `removeFromCurrentlyWatching`.
+ * planning to watch, and not one you have finished. This used to clear the
+ * watchlist only, on the reasoning that you leave for Watched by finishing — but
+ * that only covers the direction where Watched comes second. Starting a rewatch
+ * of something already marked watched went the other way and left the title in
+ * both, which is the state the rule exists to prevent.
  */
 async function addToCurrentlyWatching(db, userId, { itemId, title, posterUrl }) {
   const result = await run(
@@ -148,14 +151,7 @@ async function addToCurrentlyWatching(db, userId, { itemId, title, posterUrl }) 
     [userId, itemId, title || null, posterUrl || null, todayInAppZone()]
   );
   const added = result.changes > 0;
-  if (added) {
-    await run(db, 'DELETE FROM watchlist_items WHERE user_id = ? AND item_id = ?', [userId, itemId]);
-    await run(
-      db,
-      'DELETE FROM watchlist_streaming_cache WHERE user_id = ? AND item_id = ?',
-      [String(userId), itemId]
-    );
-  }
+  if (added) await claimForList(db, userId, itemId, 'watching');
   return added;
 }
 

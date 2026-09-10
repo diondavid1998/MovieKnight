@@ -255,4 +255,62 @@ describe('choosing between films that share a title', () => {
     const result = await searchTitleOnTmdb('Leo Delta', 2023);
     expect(result.itemId).toBe('movie-777');
   });
+
+  // ── Rows with no year ───────────────────────────────────────────────────
+  //
+  // Letterboxd leaves Year blank for a film with no release date yet. Those
+  // rows used to be dropped before the search ever ran, and the count the user
+  // was shown had already been reduced — so a watchlist could lose a title with
+  // nothing anywhere saying so.
+
+  it('resolves a title that has no year, in a single request', async () => {
+    global.fetch.mockResolvedValue(
+      jsonResponse({
+        results: [
+          { media_type: 'movie', id: 888, title: 'Leo Epsilon', release_date: '', poster_path: '/h.jpg' },
+        ],
+      })
+    );
+    const result = await searchTitleOnTmdb('Leo Epsilon', null);
+    expect(result.itemId).toBe('movie-888');
+    // One request, not four. With no year to check against every candidate is
+    // in the window, so the multi search settles it and the year-scoped
+    // fallbacks never run. Asserting the count is what pins that: the fallback
+    // finds this film too, and would hide a broken window behind three extra
+    // requests per row on an import of thousands.
+    expect(requestedPaths()).toEqual(['/search/multi']);
+  });
+
+  it('never asks TMDB for a null release year', async () => {
+    // The fallback is year-scoped. Without a year there is nothing to scope to,
+    // and primary_release_year=null is a request that can only come back wrong.
+    //
+    // total_results above the page size is what forces the fallback to run at
+    // all — an empty, complete page makes the search give up first, and this
+    // test would then pass without a single year-scoped request being possible.
+    global.fetch.mockResolvedValue(jsonResponse({ results: [], total_results: 40 }));
+    await searchTitleOnTmdb('Leo Zeta', null);
+
+    const paths = requestedPaths();
+    expect(paths).toContain('/search/movie');
+    expect(paths).toContain('/search/tv');
+    const queries = global.fetch.mock.calls.map(([url]) => new URL(url).search);
+    expect(queries.some((q) => /(primary_release_year|first_air_date_year)/.test(q))).toBe(false);
+    // One unscoped search per media type, not three of each.
+    expect(paths.filter((p) => p === '/search/movie')).toHaveLength(1);
+  });
+
+  it('still prefers an exact title when it has no year to rank on', async () => {
+    global.fetch.mockResolvedValueOnce(jsonResponse({ results: [], total_results: 5 }));
+    global.fetch.mockResolvedValue(
+      jsonResponse({
+        results: [
+          { media_type: 'movie', id: 991, title: 'The Leo Eta Story', release_date: '2027-01-01', poster_path: '/i.jpg' },
+          { media_type: 'movie', id: 992, title: 'Leo Eta', release_date: '2027-01-01', poster_path: '/j.jpg' },
+        ],
+      })
+    );
+    const result = await searchTitleOnTmdb('Leo Eta', null);
+    expect(result.itemId).toBe('movie-992');
+  });
 });

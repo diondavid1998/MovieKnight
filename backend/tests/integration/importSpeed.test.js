@@ -67,17 +67,25 @@ describe('Letterboxd import cost', () => {
       { name: 'Sicario', year: 2015 },
     ];
 
-    const first = await post({ importType: 'watchlist', replaceExisting: true, items });
+    const first = await post({
+      importType: 'watchlist', replaceExisting: true, importToken: 'tok-a', finalise: true, items,
+    });
     expect(first.status).toBe(200);
     expect(first.body.matched).toBe(2);
+    expect(first.body.added).toBe(2);
     expect(searchTitleOnTmdb).toHaveBeenCalledTimes(2);
 
     // Re-uploading the same list is the common case, because a watchlist upload
     // replaces the saved list rather than adding to it.
     searchTitleOnTmdb.mockClear();
-    const second = await post({ importType: 'watchlist', replaceExisting: true, items });
+    const second = await post({
+      importType: 'watchlist', replaceExisting: true, importToken: 'tok-b', finalise: true, items,
+    });
     expect(second.status).toBe(200);
+    // Both titles accounted for, neither of them new. Reporting `matched` from
+    // the insert alone would tell the user nothing came through.
     expect(second.body.matched).toBe(2);
+    expect(second.body.added).toBe(0);
     expect(searchTitleOnTmdb).not.toHaveBeenCalled();
   });
 
@@ -136,7 +144,12 @@ describe('Letterboxd import cost', () => {
     expect(res.status).toBe(200);
     expect(res.body.processed).toBe(100);
     const rows = await all(db, 'SELECT item_id FROM watched_items WHERE user_id = 1');
-    expect(rows.length).toBe(res.body.matched);
+    // Against `added`, not `matched`. This fixture's ids collide by design —
+    // several names resolve to the same film — so `matched` counts titles
+    // accounted for and `added` counts rows created, and only the second can
+    // equal what is in the table.
+    expect(rows.length).toBe(res.body.added);
+    expect(res.body.matched).toBeGreaterThanOrEqual(res.body.added);
   });
 
   it('resolves a batch without serialising the lookups', async () => {
