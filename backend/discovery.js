@@ -429,6 +429,9 @@ function toCard(entry) {
     overview: c.overview,
     genres: c.genres || [],
     availableOn: c.availableOn || [],
+    // Without this a rent-only suggestion carries no line about where to watch
+    // it at all: `availableOn` is empty for a title no subscription covers.
+    purchaseOn: c.purchaseOn || [],
     ratings: c.ratings || null,
     because: entry.exploration
       ? [{ kind: 'exploration', value: 'Outside your usual', detail: 'highly rated, but not your normal fare' }]

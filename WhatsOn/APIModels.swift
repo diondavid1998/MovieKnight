@@ -85,6 +85,10 @@ struct CatalogItem: Identifiable {
     var posterUrl: String?
     var genres: [String]?
     var availableOn: [String]?
+    /// Storefronts that rent or sell this title. Separate from `availableOn`
+    /// because "on Apple TV" and "£13.99 on Apple TV" are different sentences,
+    /// and one list cannot say both. Empty unless PVOD is a selected service.
+    var purchaseOn: [String]?
     var popularity: Double?
     var tmdbRating: Double?
     var tmdbVotes: Int?
@@ -102,6 +106,7 @@ struct CatalogItem: Identifiable {
 extension CatalogItem: Decodable {
     enum CodingKeys: String, CodingKey {
         case id, title, mediaType, year, overview, posterUrl, genres, availableOn
+        case purchaseOn
         case popularity, tmdbRating, tmdbVotes
         // Backend nests all third-party ratings inside a "ratings" object
         case ratings
@@ -132,6 +137,7 @@ extension CatalogItem: Decodable {
         posterUrl   = try? c.decode(String.self,    forKey: .posterUrl)
         genres      = try? c.decode([String].self,  forKey: .genres)
         availableOn = try? c.decode([String].self,  forKey: .availableOn)
+        purchaseOn  = try? c.decode([String].self,  forKey: .purchaseOn)
         popularity  = try? c.decode(Double.self,    forKey: .popularity)
         tmdbVotes   = try? c.decode(Int.self,       forKey: .tmdbVotes)
 
@@ -930,6 +936,9 @@ struct DiscoveryCard: Decodable, Identifiable {
     let overview: String?
     let genres: [String]
     let availableOn: [String]
+    /// Storefronts, for a suggestion no subscription covers. Optional so a
+    /// server that predates PVOD still decodes.
+    let purchaseOn: [String]?
     let ratings: CardRatings?
     /// Why this card is here. Not decoration — a recommendation nobody can
     /// interrogate is one nobody can trust, and it is what makes a bad

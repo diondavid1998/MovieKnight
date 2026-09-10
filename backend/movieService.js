@@ -14,9 +14,21 @@ const DEFAULT_REGION = 'US';
 //
 // Only `flatrate` used to be requested and read, so the four free services in
 // the picker — Tubi, Pluto TV, The Roku Channel and Kanopy — could be selected
-// but never returned a single title. Rentals and purchases stay excluded: this
-// app answers "what can I already watch", not "what could I buy".
+// but never returned a single title.
 const INCLUDED_MONETIZATION = ['flatrate', 'free', 'ads'];
+
+// The two ways a title costs money on its own.
+//
+// These used to be excluded outright, on the reasoning that this app answers
+// "what can I already watch", not "what could I buy". That reasoning still
+// holds for anyone who has not asked — which is why PVOD is a service you pick
+// rather than a tier that is always on. Nothing below changes for a user who
+// leaves it unselected.
+const PURCHASE_MONETIZATION = ['rent', 'buy'];
+
+// PVOD is one entry in the picker but not one storefront, so it gets a key of
+// its own and every store that rents or sells is filed under it.
+const PVOD_KEY = 'pvod';
 const DISCOVER_PAGE_COUNT = 1;
 const CACHE_TTL_MS = 10 * 60 * 1000;
 // Hard ceiling on each in-memory response cache. A full snapshot sync touches
@@ -76,6 +88,28 @@ const PLATFORM_CONFIG = {
   tubi:       { id: 73,   name: 'Tubi' },
   pluto:      { id: 300,  name: 'Pluto TV' },
   mubi:       { id: 11,   name: 'MUBI' },
+
+  // Not a service anyone subscribes to — a tier. Selecting it says "also show
+  // me what I could rent or buy", and these are the storefronts that answer.
+  //
+  // The ids scope the discover query only. Availability is read from TMDB's own
+  // `rent` and `buy` buckets rather than from this list, so a storefront missing
+  // here still shows up on a title's card correctly — it just will not pull that
+  // title into the catalog on its own. That is the safe direction to be wrong in:
+  // a store nobody listed costs you some breadth, not a wrong answer.
+  pvod: {
+    ids: [
+      2,    // Apple TV  (the store — Apple TV+ the subscription is 350)
+      3,    // Google Play Movies
+      7,    // Fandango at Home (formerly Vudu)
+      10,   // Amazon Video  (the store — Prime Video the subscription is 9)
+      68,   // Microsoft Store
+      192,  // YouTube
+    ],
+    name: 'PVOD',
+    // What marks this entry as the purchase tier everywhere else in the code.
+    purchase: true,
+  },
 };
 const tmdbCache = new Map();
 const omdbCache = new Map();
@@ -389,6 +423,25 @@ function toSortableRating(value) {
   return null;
 }
 
+/**
+ * Whether a built selection asked for rentals and purchases.
+ *
+ * Read off the map rather than threaded through every call site: the PVOD entry
+ * is in the map exactly when the user picked it, so the map already knows. One
+ * pass over at most a couple of dozen entries.
+ */
+function selectionIncludesPurchase(providerMapById) {
+  for (const entry of providerMapById.values()) if (entry.purchase) return true;
+  return false;
+}
+
+/** The monetization types a discover query should ask TMDB for. */
+function monetizationFor(providerMapById) {
+  return selectionIncludesPurchase(providerMapById)
+    ? [...INCLUDED_MONETIZATION, ...PURCHASE_MONETIZATION]
+    : INCLUDED_MONETIZATION;
+}
+
 function buildProviderSelection(platformKeys) {
   const selectedProviders = platformKeys
     .map((key) => ({ key, ...PLATFORM_CONFIG[key] }))
@@ -406,7 +459,10 @@ function buildProviderSelection(platformKeys) {
   return { providerIds, providerMapById };
 }
 
-async function discoverTitles(mediaType, providerIds, page, region = DEFAULT_REGION, extraParams = {}) {
+async function discoverTitles(
+  mediaType, providerIds, page, region = DEFAULT_REGION, extraParams = {},
+  monetization = INCLUDED_MONETIZATION
+) {
   const data = await fetchTmdb(`/discover/${mediaType}`, {
     include_adult: false,
     include_video: mediaType === 'movie' ? false : undefined,
@@ -414,7 +470,10 @@ async function discoverTitles(mediaType, providerIds, page, region = DEFAULT_REG
     page,
     sort_by: 'popularity.desc',
     watch_region: region,
-    with_watch_monetization_types: INCLUDED_MONETIZATION.join('|'),
+    // TMDB matches a title when any one of these providers offers it under any
+    // one of these types, so widening the list is a union, not an intersection:
+    // adding the stores cannot drop a subscription title someone already had.
+    with_watch_monetization_types: monetization.join('|'),
     with_watch_providers: providerIds.join('|'),
     ...extraParams,
   });
@@ -447,18 +506,49 @@ async function fetchTitleWithCredits(mediaType, tmdbId) {
   });
 }
 
-/** Every provider offering this title at no extra cost, across all three tiers. */
-function includedProviders(watchProviders, region = DEFAULT_REGION) {
+/**
+ * Every offer on this title, tagged with the tier it came from.
+ *
+ * The tier rides along because the caller has to tell "included with something
+ * you pay for monthly" apart from "yours for £13.99". Showing a rental in the
+ * same breath as a subscription would be the same lie the free tiers used to
+ * tell before they were read at all.
+ */
+function includedProviders(watchProviders, region = DEFAULT_REGION, { includePurchase = false } = {}) {
   const forRegion = watchProviders?.results?.[region];
   if (!forRegion) return [];
-  return INCLUDED_MONETIZATION.flatMap((tier) => forRegion[tier] || []);
+  const tiers = includePurchase
+    ? [...INCLUDED_MONETIZATION, ...PURCHASE_MONETIZATION]
+    : INCLUDED_MONETIZATION;
+  return tiers.flatMap((tier) => (forRegion[tier] || []).map((p) => ({ ...p, tier })));
 }
 
+/**
+ * Split a title's offers into what a subscription covers and what costs money.
+ *
+ * Subscription offers are matched against the user's selection, because "on
+ * Netflix" is only interesting to someone who has Netflix. Purchase offers are
+ * not: whoever sells it, you can buy it, so every store found under `rent` or
+ * `buy` is named as it comes — which is also why an id missing from the PVOD
+ * list above cannot produce a wrong answer here.
+ */
 function normalizeProviders(details, providerMapById, region = DEFAULT_REGION) {
+  const includePurchase = selectionIncludesPurchase(providerMapById);
   const seen = new Set();
   const names = [];
   const keys = [];
-  for (const provider of includedProviders(details['watch/providers'], region)) {
+  const purchaseNames = [];
+
+  for (const provider of includedProviders(details['watch/providers'], region, { includePurchase })) {
+    if (PURCHASE_MONETIZATION.includes(provider.tier)) {
+      // One store lists a film once to rent and again to buy; it is one place
+      // to get it either way.
+      const name = provider.provider_name;
+      if (!name || purchaseNames.includes(name)) continue;
+      purchaseNames.push(name);
+      if (!keys.includes(PVOD_KEY)) keys.push(PVOD_KEY);
+      continue;
+    }
     const entry = providerMapById.get(provider.provider_id);
     // A title can appear under more than one tier — free and ads both list
     // Pluto, for instance — so dedupe by key rather than trusting TMDB.
@@ -468,7 +558,7 @@ function normalizeProviders(details, providerMapById, region = DEFAULT_REGION) {
       keys.push(entry.key);
     }
   }
-  return { names, keys };
+  return { names, keys, purchaseNames };
 }
 
 function normalizeCatalogItem(rawItem, details, ratings, providers, mediaType) {
@@ -493,6 +583,9 @@ function normalizeCatalogItem(rawItem, details, ratings, providers, mediaType) {
     popularity: rawItem.popularity || details.popularity || null,
     originalLanguage: rawItem.original_language || details.original_language || null,
     genres: Array.isArray(details.genres) ? details.genres.map((genre) => genre.name) : [],
+    // Where you can rent or buy it, named separately from what a subscription
+    // covers. Empty for anyone who has not picked PVOD.
+    purchaseOn: providers?.purchaseNames || [],
     imdbId: details.external_ids?.imdb_id || r.imdbId || null,
     ratings: {
       tmdb: rawItem.vote_average || details.vote_average || null,
@@ -647,7 +740,7 @@ async function fetchCatalogByPlatforms(platforms, options = {}) {
           discoverTitles(type, providerIds, index + 1, region, {
             ...extraDiscoverParams,
             ...(languageCode ? { with_original_language: languageCode } : {}),
-          }).then((results) =>
+          }, monetizationFor(providerMapById)).then((results) =>
             results.map((item) => ({ ...item, media_type: type }))
           )
         )
@@ -988,10 +1081,16 @@ module.exports = {
   resetTmdbBreaker,
   isTmdbRefusal,
   includedProviders,
+  selectionIncludesPurchase,
+  monetizationFor,
+  PURCHASE_MONETIZATION,
+  PVOD_KEY,
   searchCatalog,
   fetchTitlesByPerson,
   // Exported for unit testing
   buildRatingsPayload,
   toSortableRating,
   sortCatalog,
+  buildProviderSelection,
+  normalizeProviders,
 };

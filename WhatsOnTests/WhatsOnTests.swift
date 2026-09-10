@@ -265,7 +265,22 @@ final class WhatsOnTests: XCTestCase {
             XCTAssertTrue(knownPlatformKeys.contains(platform.key),
                           "\(platform.key) is not in knownPlatformKeys")
         }
-        XCTAssertEqual(allPlatforms.count, 15)
+        // Keys must be unique, which is the drift the count above was really
+        // standing in for: `knownPlatformKeys` is a Set, so a duplicate key
+        // would shrink it silently and let one tile shadow another.
+        XCTAssertEqual(knownPlatformKeys.count, allPlatforms.count,
+                       "two services share a key")
+        // Fifteen subscriptions plus PVOD, which is a tier rather than a
+        // service. Update deliberately: the number failing is the point.
+        XCTAssertEqual(allPlatforms.count, 16)
+    }
+
+    /// PVOD is the one tile that is not something you subscribe to, and the
+    /// backend keys off exactly this string to widen the discover query.
+    func testPVODShipsUnderTheKeyTheBackendExpects() {
+        let pvod = allPlatforms.first { $0.key == "pvod" }
+        XCTAssertNotNil(pvod, "the PVOD tile is missing from the picker")
+        XCTAssertEqual(pvod?.name, "PVOD")
     }
 
     func testAServiceMonogramStaysLegibleOnItsOwnAccent() {
@@ -335,6 +350,36 @@ final class WhatsOnTests: XCTestCase {
         // The facets added later are optional, so an older server still decodes.
         XCTAssertTrue(response.filters.available.options(for: "keyword").isEmpty)
         XCTAssertTrue(response.filters.available.options(for: "country").isEmpty)
+    }
+
+    /// PVOD arrived after the app shipped, so a server that predates it sends no
+    /// `purchaseOn` at all — and a catalog item has to decode either way.
+    func testACatalogItemDecodesWithAndWithoutStorefronts() throws {
+        let withStores = try decode(CatalogItem.self, #"""
+        {"id":"movie-1","title":"A Film","mediaType":"movie","year":2024,
+         "availableOn":["Netflix"],"purchaseOn":["Apple TV","Amazon Video"]}
+        """#)
+        XCTAssertEqual(withStores.availableOn, ["Netflix"])
+        XCTAssertEqual(withStores.purchaseOn, ["Apple TV", "Amazon Video"])
+
+        let older = try decode(CatalogItem.self, #"""
+        {"id":"movie-2","title":"Another","mediaType":"movie","year":2024,
+         "availableOn":["Netflix"]}
+        """#)
+        XCTAssertNil(older.purchaseOn)
+    }
+
+    /// A suggestion no subscription covers has an empty `availableOn`, so
+    /// without the storefronts the card would say nothing about where to watch.
+    func testADiscoveryCardCarriesStorefrontsWhenNothingStreamsIt() throws {
+        let card = try decode(DiscoveryCard.self, #"""
+        {"itemId":"movie-3","title":"Rent Only","year":2026,"mediaType":"movie",
+         "posterUrl":null,"overview":null,"genres":[],"availableOn":[],
+         "purchaseOn":["Apple TV"],"ratings":null,"because":[],"tier":1,
+         "exploration":false}
+        """#)
+        XCTAssertTrue(card.availableOn.isEmpty)
+        XCTAssertEqual(card.purchaseOn, ["Apple TV"])
     }
 
     /// The lookup button drives on `totalPending`, not on `pending`. Someone who
