@@ -265,7 +265,22 @@ final class WhatsOnTests: XCTestCase {
             XCTAssertTrue(knownPlatformKeys.contains(platform.key),
                           "\(platform.key) is not in knownPlatformKeys")
         }
-        XCTAssertEqual(allPlatforms.count, 15)
+        // Keys must be unique, which is the drift the count above was really
+        // standing in for: `knownPlatformKeys` is a Set, so a duplicate key
+        // would shrink it silently and let one tile shadow another.
+        XCTAssertEqual(knownPlatformKeys.count, allPlatforms.count,
+                       "two services share a key")
+        // Fifteen subscriptions plus PVOD, which is a tier rather than a
+        // service. Update deliberately: the number failing is the point.
+        XCTAssertEqual(allPlatforms.count, 16)
+    }
+
+    /// PVOD is the one tile that is not something you subscribe to, and the
+    /// backend keys off exactly this string to widen the discover query.
+    func testPVODShipsUnderTheKeyTheBackendExpects() {
+        let pvod = allPlatforms.first { $0.key == "pvod" }
+        XCTAssertNotNil(pvod, "the PVOD tile is missing from the picker")
+        XCTAssertEqual(pvod?.name, "PVOD")
     }
 
     func testAServiceMonogramStaysLegibleOnItsOwnAccent() {
