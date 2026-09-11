@@ -210,6 +210,41 @@ async function finaliseWatchlistImport(db, userId, token) {
 }
 
 /**
+ * Carry a stored platform selection across the PVOD → VOD rename.
+ *
+ * The key is not just a label: it is persisted in `users.platforms`, and
+ * `buildProviderSelection` drops anything it does not recognise. Renaming
+ * without this would silently un-pick the tile for everyone who had chosen it —
+ * no error, no empty state, just a setting that quietly reverted.
+ *
+ * Lives here rather than in a SQL migration because the column holds a JSON
+ * array and SQLite's json1 extension is not guaranteed to be compiled in.
+ *
+ * One-off, guarded on the same ledger as the list repair, and for the same
+ * reason: it rewrites user data, and a rewrite that runs unattended forever is
+ * one refactor away from rewriting the wrong thing.
+ */
+async function renamePvodToVod(db) {
+  const done = await all(db, "SELECT 1 FROM list_repairs WHERE name = 'pvod-renamed-to-vod'");
+  if (done.length) return null;
+  await run(db, "INSERT OR IGNORE INTO list_repairs (name) VALUES ('pvod-renamed-to-vod')");
+
+  const users = await all(db, 'SELECT id, platforms FROM users WHERE platforms LIKE ?', ['%pvod%']);
+  let changed = 0;
+  for (const user of users) {
+    let platforms;
+    try { platforms = JSON.parse(user.platforms || '[]'); } catch { continue; }
+    if (!Array.isArray(platforms) || !platforms.includes('pvod')) continue;
+    // Mapped, not appended: someone who had both would otherwise end up with a
+    // duplicate, and the selection is a set.
+    const renamed = [...new Set(platforms.map((key) => (key === 'pvod' ? 'vod' : key)))];
+    await run(db, 'UPDATE users SET platforms = ? WHERE id = ?', [JSON.stringify(renamed), user.id]);
+    changed += 1;
+  }
+  return { users: changed };
+}
+
+/**
  * One-off repair for the overlaps that already exist.
  *
  * Precedence is watched > currently watching > watchlist, which is what every
@@ -292,5 +327,6 @@ module.exports = {
   alreadyWatched,
   finaliseWatchlistImport,
   reconcileLists,
+  renamePvodToVod,
   findListOverlaps,
 };

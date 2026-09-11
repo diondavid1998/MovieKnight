@@ -2,7 +2,7 @@
 require('dotenv').config();
 const sqlite3 = require('sqlite3').verbose();
 const { ensureCatalogTables } = require('./catalogCache');
-const { ensureListTables, reconcileLists } = require('./lists');
+const { ensureListTables, reconcileLists, renamePvodToVod } = require('./lists');
 const { createApp } = require('./app');
 
 const PORT = process.env.PORT || 4000;
@@ -117,6 +117,14 @@ ensureCatalogTables(db).catch((error) => {
 // enforced in some write paths and not others — so existing databases hold
 // titles sitting in two lists at once. Repaired once, then never again.
 ensureListTables(db)
+  .then(async () => {
+    // Before the overlap repair, because both write to the same ledger and the
+    // rename has to land whether or not the repair has already run.
+    const renamed = await renamePvodToVod(db);
+    if (renamed?.users) {
+      console.log(`[lists] moved ${renamed.users} platform selection(s) from pvod to vod`);
+    }
+  })
   .then(() => reconcileLists(db))
   .then((repaired) => {
     if (repaired) {
