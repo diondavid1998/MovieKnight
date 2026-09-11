@@ -649,6 +649,20 @@ function createApp(db, { disableRateLimit = false, rateLimitMax = null } = {}) {
         if (this.changes === 0) {
           return res.status(401).json({ error: 'Account no longer exists. Sign in again.' });
         }
+        // A saved title's availability is computed against the selection — "on
+        // Netflix" only means something to someone who has Netflix — so changing
+        // the selection makes every cached row an answer to the wrong question.
+        //
+        // Nothing expired them before. The rows carry a `checked_at`, but
+        // `isAvailabilityFresh` short-circuits to true whenever CATALOG_SYNC_HOURS
+        // is unset, which is the default: this server refreshes when asked and
+        // not on a timer. So picking a new service changed nothing at all in the
+        // watchlist view, indefinitely, until someone pressed Refresh Catalog.
+        //
+        // Marked rather than deleted, and the re-fetch is lazy on the next read,
+        // so saving your services never blocks on a walk of the whole watchlist.
+        invalidateWatchlistAvailability(db, req.user.id)
+          .catch((e) => console.error('[platforms] could not invalidate availability:', e.message));
         res.json({ success: true });
       }
     );
@@ -1634,8 +1648,15 @@ function createApp(db, { disableRateLimit = false, rateLimitMax = null } = {}) {
     const streamingOnly = req.query.streamingOnly === 'true';
 
     // watchlistOnly: bypass the shared catalog and query TMDB directly for each
-    // watchlist item, with a per-user 24-hour streaming-availability cache. This
-    // ensures obscure titles (not in the popular snapshot) are still found.
+    // watchlist item, with a per-user streaming-availability cache. This ensures
+    // obscure titles (not in the popular snapshot) are still found.
+    //
+    // That cache does not expire on a clock, whatever this comment used to say:
+    // `isAvailabilityFresh` short-circuits to true unless CATALOG_SYNC_HOURS is
+    // set, and it is unset by default. Rows are refreshed when the user changes
+    // their services or presses Refresh Catalog, and not otherwise — which is
+    // the whole manual-refresh policy, not an oversight. The stale "24-hour"
+    // wording here is what made a genuine staleness bug look like a wait.
     if (watchlistOnly) {
       let watchlistDetailRows = [];
       let watchedIds = new Set();
@@ -1811,7 +1832,7 @@ function createApp(db, { disableRateLimit = false, rateLimitMax = null } = {}) {
     db.run('DELETE FROM watchlist_items WHERE user_id = ?', [req.user.id], function (err) {
       if (err) return res.status(500).json({ error: 'Database error' });
       // Drop the availability cache too, or cleared titles resurface in the
-      // "From watchlist" view until their 24-hour TTL expires.
+      // "From watchlist" view — nothing expires them on a timer.
       db.run('DELETE FROM watchlist_streaming_cache WHERE user_id = ?', [req.user.id]);
       res.json({ success: true, removed: this.changes });
     });

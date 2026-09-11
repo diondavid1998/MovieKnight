@@ -85,10 +85,11 @@ struct CatalogItem: Identifiable {
     var posterUrl: String?
     var genres: [String]?
     var availableOn: [String]?
-    /// Storefronts that rent or sell this title. Separate from `availableOn`
-    /// because "on Apple TV" and "£13.99 on Apple TV" are different sentences,
-    /// and one list cannot say both. Empty unless PVOD is a selected service.
-    var purchaseOn: [String]?
+    /// Storefronts that rent or sell this title, each carrying which of the two
+    /// it offers. Separate from `availableOn` because "on Apple TV" and "£13.99
+    /// on Apple TV" are different sentences, and one list cannot say both.
+    /// Empty unless VOD is a selected service.
+    var purchaseOn: [PurchaseOffer]?
     var popularity: Double?
     var tmdbRating: Double?
     var tmdbVotes: Int?
@@ -137,7 +138,7 @@ extension CatalogItem: Decodable {
         posterUrl   = try? c.decode(String.self,    forKey: .posterUrl)
         genres      = try? c.decode([String].self,  forKey: .genres)
         availableOn = try? c.decode([String].self,  forKey: .availableOn)
-        purchaseOn  = try? c.decode([String].self,  forKey: .purchaseOn)
+        purchaseOn  = try? c.decode([PurchaseOffer].self, forKey: .purchaseOn)
         popularity  = try? c.decode(Double.self,    forKey: .popularity)
         tmdbVotes   = try? c.decode(Int.self,       forKey: .tmdbVotes)
 
@@ -923,6 +924,20 @@ final class APIService {
     }
 }
 
+/// One storefront selling a title, and on what terms.
+///
+/// `tiers` holds "rent", "buy", or both. Kept apart rather than collapsed to a
+/// name, because a title you can only purchase was reading as "Rent · Apple TV".
+struct PurchaseOffer: Decodable, Hashable {
+    let name: String
+    let tiers: [String]
+
+    /// The verb that actually applies. Rent wins when a store offers both: it
+    /// is the cheaper way in, and the one someone deciding tonight wants.
+    var verb: String { tiers.contains("rent") ? "Rent" : "Buy" }
+    var label: String { "\(verb) · \(name)" }
+}
+
 // MARK: - Discovery
 
 /// One suggestion, and the reason it is being made.
@@ -937,8 +952,8 @@ struct DiscoveryCard: Decodable, Identifiable {
     let genres: [String]
     let availableOn: [String]
     /// Storefronts, for a suggestion no subscription covers. Optional so a
-    /// server that predates PVOD still decodes.
-    let purchaseOn: [String]?
+    /// server that predates VOD still decodes.
+    let purchaseOn: [PurchaseOffer]?
     let ratings: CardRatings?
     /// Why this card is here. Not decoration — a recommendation nobody can
     /// interrogate is one nobody can trust, and it is what makes a bad

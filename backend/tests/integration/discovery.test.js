@@ -379,11 +379,11 @@ describe('the second tier', () => {
 
 describe('a suggestion nobody streams', () => {
   it('carries the storefronts, so the card can say where to watch it', async () => {
-    // A reader who picked PVOD. Their scope key names both services, and the
+    // A reader who picked VOD. Their scope key names both services, and the
     // candidate query filters on the same keys — so a rentable title is only
     // ever suggested to someone who asked for rentable titles.
-    await auth(request(app).put('/platforms')).send({ platforms: ['netflix', 'pvod'], languages: [] });
-    const pvodScope = 'region:US|platforms:netflix,pvod|languages:';
+    await auth(request(app).put('/platforms')).send({ platforms: ['netflix', 'vod'], languages: [] });
+    const vodScope = 'region:US|platforms:netflix,vod|languages:';
 
     await new Promise((resolve, reject) => db.run(
       `INSERT INTO catalog_cache_entries
@@ -391,8 +391,8 @@ describe('a suggestion nobody streams', () => {
           first_seen_at, genres_json, original_language, rating_imdb, rating_imdb_num,
           available_on_keys_json, available_on_json, purchase_on_json)
        VALUES (?, 'movie', 9001, 'Rent Only Pick', '2026', '2026-01-01', 90, CURRENT_TIMESTAMP,
-               CURRENT_TIMESTAMP, '["Drama"]', 'en', '7.8', 7.8, '["pvod"]', '[]', '["Apple TV"]')`,
-      [pvodScope],
+               CURRENT_TIMESTAMP, '["Drama"]', 'en', '7.8', 7.8, '["vod"]', '[]', '[{"name":"Apple TV","tiers":["rent"]}]')`,
+      [vodScope],
       (e) => (e ? reject(e) : resolve())
     ));
 
@@ -402,6 +402,6 @@ describe('a suggestion nobody streams', () => {
     // Nothing a subscription covers, so without the storefronts this card would
     // render no availability line at all.
     expect(card.availableOn).toEqual([]);
-    expect(card.purchaseOn).toEqual(['Apple TV']);
+    expect(card.purchaseOn).toEqual([{ name: 'Apple TV', tiers: ['rent'] }]);
   });
 });
